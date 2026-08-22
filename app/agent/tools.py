@@ -46,6 +46,19 @@ logger = logging.getLogger("agent.tools")
 # ---------------------------------------------------------------------------
 
 
+# Minimum BM25 relevance a chunk must clear to count as usable agent
+# evidence (Phase 4 s2; SQLite FTS5's bm25() is negative, lower/more-
+# negative = stronger match). Calibrated against the real pack, not
+# invented: genuinely relevant queries' top matches score roughly -1.9 to
+# -14.5 here, while a clearly off-topic question ("What is the weather
+# today?") tops out around -0.34 - comfortably above this cutoff. This is
+# a lexical-relevance filter only; it does not (and cannot) detect a
+# question whose retrieved chunks score strongly but don't actually
+# contain the specific fact asked for - that is a separate, harder,
+# still-open gap, documented in docs/evaluation_report.md.
+MIN_RELEVANCE_SCORE = -1.0
+
+
 class SearchDocumentsRequest(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -78,14 +91,16 @@ def search_documents_tool(
     )
     start = time.perf_counter()
     with span("tool.search_documents", context, query=request.query, top_k=request.top_k):
-        results = search_documents(conn, request.query, filters, request.top_k)
+        raw_results = search_documents(conn, request.query, filters, request.top_k)
+    results = [r for r in raw_results if r.score <= MIN_RELEVANCE_SCORE]
     latency_ms = (time.perf_counter() - start) * 1000
 
     logger.info(
         "tool.search_documents",
         extra={
             "request_id": context.request_id, "trace_id": context.trace_id,
-            "result_count": len(results), "latency_ms": round(latency_ms, 3),
+            "result_count": len(results), "filtered_count": len(raw_results) - len(results),
+            "latency_ms": round(latency_ms, 3),
         },
     )
     return SearchDocumentsResponse(query=request.query, results=results, latency_ms=latency_ms)
