@@ -327,3 +327,38 @@ not what it meant when file-backed tracking was still the default.
 `scripts/run_deepeval_baseline.py --mlflow` both log real, queryable runs
 against it - verified by querying the run back, not just by a write that
 did not error.
+
+---
+
+## ADR-021 - Anthropic retries: classify by exception type, not blanket except
+
+**Context.** Phase 2's `AnthropicProvider` retried on any exception,
+including permanent failures (auth, malformed request, invalid model) that
+retrying cannot fix - Phase 3 pre-flight 2.4 flagged this.
+
+**Decision.** `app/llm/anthropic_provider.py` retries only
+`APIConnectionError`/`APITimeoutError`/`RateLimitError`/
+`InternalServerError`/`OverloadedError`/`ServiceUnavailableError` - a
+closed, named list. Everything else (including any future/unknown
+exception type) raises immediately. Backoff is exponential with full
+jitter (`uniform(0, min(max_delay, base * 2**attempt))`), bounded by
+`request.max_retries`, and the realized retry count is recorded on
+`LLMResponse.retries`.
+
+**Rationale, checked rather than assumed.** The SDK exposes a
+`RetryableError` marker class; inspecting `__mro__` on every relevant
+exception (`anthropic==1.0.0`) showed none of them actually inherit it, so
+it is not usable for this classification - a plausible-looking shortcut
+that turned out not to work, caught by checking rather than trusting the
+name.
+
+**Testing without a network call.** `tests/unit/test_anthropic_retry.py`
+monkeypatches `_client.messages.create` to raise real SDK exception
+instances (built from real `httpx2` - anthropic's vendored httpx fork -
+`Request`/`Response` objects, not a duck-typed stand-in that might not
+satisfy the exception's own `__init__`) on a scripted schedule, and
+replaces `sleep_fn` with a recorder. 13 tests run in 0.14s and prove: every
+transient type retries and eventually succeeds; every permanent type
+raises on the first attempt with zero retries and zero backoff calls;
+retries exhaust and re-raise the transient error past `max_retries`; and
+backoff delays stay within the configured bounds.
