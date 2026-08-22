@@ -10,19 +10,22 @@ name: CI
 #     and pass here - it never needs the real source pack. This is the
 #     public, always-runs "deterministic domain / security / regression"
 #     tier, not a substitute for real evaluation - see
-#     tests/fixture_backed/README.md.
+#     tests/fixture_backed/README.md. It now includes the HTTP API layer
+#     (app/api/) exercised end to end via FastAPI's TestClient against the
+#     same fixture database - requires the `api` extra (fastapi/httpx).
 #   - Everything else (tests/unit, tests/integration, tests/regression,
 #     tests/evaluation) uses the source_dir/conn/clock/auth fixtures in
-#     tests/conftest.py, which skip.gracefully when PARCELPILOT_SOURCE_DIR
+#     tests/conftest.py, which skip gracefully when PARCELPILOT_SOURCE_DIR
 #     is unset - the confidential assessment pack is never committed
 #     (AGENTS.md rule 18) and this repo has no secret wired to supply it on
 #     hosted runners. Verified locally: with no pack available, the full
-#     suite reports "105 passed, 110 skipped, 0 failed" - lint, type
+#     suite reports "192 passed, 114 skipped, 0 failed" - lint, type
 #     checking, and every pack-independent test (parsing/normalization
 #     logic, the LLM gateway/provider-fallback routing, prompt registry,
 #     MLflow tracking, DeepEval harness, the agent state machine/tool
-#     registry/entity resolution, the fixture-backed security regressions,
-#     and the entire fixture_backed/ tier) still run and still catch real
+#     registry/entity resolution, Operations Radar detection/authorization,
+#     the HTTP API layer, the fixture-backed security regressions, and the
+#     entire fixture_backed/ tier) still run and still catch real
 #     regressions.
 #
 # Real, protected evaluation against the actual pack lives in eval.yml.
@@ -49,13 +52,16 @@ jobs:
       - name: Create venv and install dependencies
         run: |
           uv venv .venv
-          uv pip install --python .venv/bin/python -e ".[dev,llm,evaluation]"
+          uv pip install --python .venv/bin/python -e ".[dev,llm,evaluation,api]"
 
       - name: Ruff
         run: .venv/bin/python -m ruff check app scripts tests
 
       - name: Pyright
-        run: .venv/bin/python -m pyright app scripts/ingest_sources.py scripts/run_retrieval_eval.py scripts/run_deepeval_baseline.py scripts/run_performance_benchmark.py scripts/run_agent_cli.py scripts/run_agent_trajectory_eval.py tests
+        run: .venv/bin/python -m pyright app scripts/ingest_sources.py scripts/run_retrieval_eval.py scripts/run_deepeval_baseline.py scripts/run_performance_benchmark.py scripts/run_agent_cli.py scripts/run_agent_trajectory_eval.py scripts/run_operations_radar_eval.py tests
+
+      - name: API app import smoke test
+        run: .venv/bin/python -c "from app.api.main import app; assert app.routes"
 
       - name: Public fixture-backed tests (must all pass, never skip)
         run: .venv/bin/python -m pytest tests/fixture_backed -v
