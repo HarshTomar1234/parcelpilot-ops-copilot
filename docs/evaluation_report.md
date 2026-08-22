@@ -8,8 +8,13 @@ here is estimated or projected.
 
 | Suite | Real pack | No pack (hosted CI) |
 |---|---|---|
-| Full `pytest` | 306 passed | 192 passed, 114 skipped, 0 failed |
-| `tests/fixture_backed/` only | 125 passed | 125 passed (never skips - see below) |
+| Full `pytest` | 331 passed | 217 passed, 114 skipped, 0 failed |
+| `tests/fixture_backed/` only | 150 passed | 150 passed (never skips - see below) |
+
+(Requires the `api` extra - `pip install -e ".[dev,llm,evaluation,api]"` -
+since `tests/fixture_backed/` now exercises `app/api/` via FastAPI's
+`TestClient`. Without it, that tier's API-specific test files fail to
+collect; every other suite is unaffected.)
 
 `tests/fixture_backed/` is the only suite `.github/workflows/ci.yml`
 guarantees runs and never skips - it uses a fabricated, version-controlled
@@ -191,6 +196,39 @@ generic domain vocabulary from the match; both true positives
 gone on the current real-pack run (0 of 6 alerts is a false positive by
 manual verification against the source records each cites).
 
+## API layer and deployment (Phase 6)
+
+**MEASURED** (see [`performance_report.md`](performance_report.md)'s "API
+layer" section for the full numbers): 25 fixture-backed API tests
+(`tests/fixture_backed/test_api_*.py`) covering health/readiness, chat,
+Operations Radar (including the `restricted_support` denial and scope
+filtering through the HTTP layer), the full action workflow through HTTP
+(prepare -> confirm -> execute -> idempotent re-execute -> audit read
+back), and a chained end-to-end path (a chat question, then a separately
+prepared/confirmed/executed escalation) - all against the fabricated
+fixture corpus, never the real pack, all passing. End-to-end HTTP latency
+for `/api/chat` and `/api/radar/run` at 1/5/10 concurrent requests, and a
+single-call latency for each action-workflow endpoint, measured against
+the real pack through an actual Docker container (`docker build` +
+`docker run`), not `TestClient`.
+
+A real concurrency bug was found by this measurement and fixed before
+being reported: FastAPI's per-request SQLite connection could cross
+threads under concurrent load (`sqlite3.ProgrammingError`), fixed with
+`check_same_thread=False` in `app/db/connection.py::connect()` - the
+before/after numbers are both in `performance_report.md`, not just the
+fixed one. A second real issue was found and documented (not a bug, a
+deployment-configuration fact): mounting the database read-only breaks
+`prepare_escalation`'s audit-row write - the deployment docs now say so
+explicitly.
+
+**NOT AVAILABLE:** live-model cost/latency for `/api/chat` (no
+`ANTHROPIC_API_KEY` in this environment - `MockProvider` latency is
+reported and labeled as such, never presented as production LLM
+latency); a real judge-scored evaluation of the API layer's answers
+(the existing DeepEval/agent-trajectory limitation above applies
+identically here, since `/api/chat` calls the same `run_agent()`).
+
 ## Release gates
 
 Per [`quality_gates.md`](quality_gates.md):
@@ -199,7 +237,7 @@ Per [`quality_gates.md`](quality_gates.md):
 |---|---|
 | 0 unauthorized access | Met - all security tests pass, including the action workflow's |
 | 0 unsafe actions | Met - every action security scenario fails safely with a structured error, never a silent success or a duplicated effect |
-| 0 deterministic regressions | Met - 306/306 pytest, including the full domain and Operations Radar suites |
+| 0 deterministic regressions | Met - 331/331 pytest, including the full domain, Operations Radar, and API-layer suites |
 | 0 invalid required citations | Met - an invalid citation gets one bounded repair attempt, then a controlled `evidence_validation_failed` result if still invalid - never a silently-edited answer shown as valid |
 | RAG/agent quality thresholds | **Not set** - no real judge-scored baseline exists yet (MockProvider limitation) |
 

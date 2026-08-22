@@ -2,15 +2,17 @@
 
 ## What it is
 
-An internal assistant for ParcelPilot support/operations staff. A staff
-member asks a plain-language question about a customer, order, or ticket;
-the system resolves what's being asked, looks up real account/order/ticket
-data and policy documents, runs the same deterministic calculations a
-trained agent would run by hand, and returns a grounded, cited answer with
-an explicit confidence level.
+An internal assistant for ParcelPilot support/operations staff, delivered
+as three surfaces on one deterministic core: **Support Copilot** answers
+a plain-language question about a customer, order, or ticket with a
+grounded, cited, trust-scored answer; **Operations Radar** proactively
+surfaces operational issues before anyone asks about them; and a safe
+**escalation workflow** lets an eligible ticket move from investigation
+to a confirmed, audited escalation. All three are reachable through a
+staff web UI and a typed HTTP API (`app/api/`), not just a script.
 
 It is built to feel like an internal operations assistant, not a generic
-chat model: every fee, deadline, and severity it states is a real,
+chat model: every fee, deadline, severity, and alert it states is a real,
 computed number tied to a real source, not a plausible-sounding guess.
 
 ## What it can do today
@@ -42,6 +44,10 @@ computed number tied to a real source, not a plausible-sounding guess.
   a judgment call - and nothing is actually escalated until a separate,
   explicit confirmation step happens; the assistant itself only ever
   recommends.
+- All of the above through a staff web UI (three tabs: Support Copilot,
+  Operations Radar, Action Panel) and a typed HTTP API, with the current
+  demo identity, its role, and the fixed dataset snapshot always visible
+  - not only through a developer CLI.
 
 ## Operations Radar: proactive issue detection
 
@@ -106,19 +112,21 @@ prove the detection engine itself works.
   *recommend* preparing an escalation, never trigger one.
 - **No second action type.** A ticket-update action beyond escalation
   isn't built.
-- **No dashboard or scheduled monitoring.** Operations Radar runs on
-  demand today (a tool call or `scripts/run_operations_radar_eval.py`),
-  not on a schedule, and has no persistent alert state or UI.
+- **No scheduled monitoring.** Operations Radar runs on demand - a UI
+  button, an API call, or `scripts/run_operations_radar_eval.py` - not on
+  a schedule, and has no persistent alert state (new/acknowledged/
+  resolved) across runs.
 - **No bulk question-answering in the reactive assistant.** "Which open
   tickets are past their SLA target" as a *conversational* question isn't
   supported - that exact pattern is what Operations Radar's SLA-breach
   rule answers proactively instead.
 - **No conversation memory.** Each question is answered independently.
-- **No polished interface.** Today it's command-line tools
-  (`scripts/run_agent_cli.py` for questions,
-  `scripts/run_operations_radar_eval.py` for detection) for internal
-  verification and demos, not a staff-facing product surface; the action
-  workflow has no CLI yet either.
+- **No real identity provider.** The staff UI's identity picker maps a
+  chosen demo identity (`ops_admin` / `support_agent` /
+  `restricted_support`) to a real, server-owned `AuthContext` - a
+  deliberate stand-in for a hosted assessment, never a design for
+  production login. The account-scope enforcement it exercises is real;
+  the "who is logged in" mechanism around it is not.
 
 Recorded with concrete detail in
 [`docs/evaluation_report.md`](evaluation_report.md).

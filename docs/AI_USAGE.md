@@ -1,11 +1,12 @@
 # AI-Assisted Development
 
-Built with Claude (Anthropic) via Claude Code across all phases,
-including agent orchestration (Phase 3) and agent hardening plus the
-state-changing action workflow (Phase 4). This note covers what Claude
-Code actually did, in the specific and verifiable sense: which commands
-were run, what they found, and what changed as a result - not a general
-disclosure.
+Built with Claude (Anthropic) via Claude Code across all phases: agent
+orchestration (Phase 3), agent hardening plus the state-changing action
+workflow (Phase 4), Operations Radar deterministic detection (Phase 5),
+and the FastAPI/staff-UI product surface plus deployment (Phase 6). This
+note covers what Claude Code actually did, in the specific and verifiable
+sense: which commands were run, what they found, and what changed as a
+result - not a general disclosure.
 
 ## What was AI-assisted
 
@@ -20,6 +21,15 @@ prompt-injection tests, the full `app/actions/` state-changing action
 workflow (prepare/confirm/execute, audit trail, security tests), and this
 documentation set.
 
+Phase 5: `app/detection/` (deterministic detection rules, fingerprinting,
+service layer, optional LLM summary), the `detect_issues` agent tool,
+and the associated test suites.
+
+Phase 6: `app/api/` (FastAPI routes, dependency injection, middleware,
+error handling), the static staff UI (`app/api/static/`), `Dockerfile` /
+`docker-entrypoint.sh`, `scripts/run_api_load_test.py`, the API test
+suite, and this phase's documentation updates.
+
 ## What was verified, not assumed
 
 Every claim of "done" in this phase's docs and the private phase report
@@ -29,9 +39,15 @@ corresponds to a command that was actually run:
   writing it, not just at the end.
 - Every new test file was run in isolation before being folded into the
   full suite.
-- The full suite was run repeatedly (265 passed with the real pack; 155
-  passed / 110 skipped / 0 failed with none) to catch regressions as work
-  progressed, not once at the end.
+- The full suite was run repeatedly through every phase (331 passed with
+  the real pack; 217 passed / 114 skipped / 0 failed with none, as of
+  Phase 6) to catch regressions as work progressed, not once at the end.
+- The Docker image was actually built and run this phase (not just
+  authored) - `docker build`, then `docker run` against the real,
+  ingested database via all three documented delivery mechanisms (file
+  mount, `PARCELPILOT_DB_B64_FILE`, `PARCELPILOT_DB_B64`) - and the
+  concurrency smoke test was run against that live container, not
+  `TestClient`.
 - `scripts/run_agent_cli.py` was run against the real database with real
   questions, not just unit-tested, before being called working.
 - `scripts/run_agent_trajectory_eval.py` was run against the real golden
@@ -79,6 +95,20 @@ aggregate-language carve-out, re-verified with a third eval run
 (0.82 -> 0.88, both mismatches gone that a keyword rule could realistically
 fix). The lesson generalizes: an aggregate score improving is not proof
 that nothing regressed - the per-case table is what actually shows that.
+
+Phase 6 found a real concurrency bug via its own load-test script, not
+code review: the first run of `scripts/run_api_load_test.py` against a
+live Docker container produced errors at concurrency 5 and 10
+(`sqlite3.ProgrammingError: SQLite objects created in a thread can only
+be used in that same thread`) - FastAPI's threadpool doesn't guarantee a
+sync dependency's setup and the route handler share one OS thread. Fixed
+with `check_same_thread=False` in `app/db/connection.py::connect()`;
+re-running the same test confirmed 0 errors at every level. The same
+session's manual container testing also found that mounting the database
+read-only breaks `prepare_escalation`'s audit-row write - not a code bug,
+but a real deployment-configuration trap now documented explicitly in
+the README and `docker-entrypoint.sh` rather than left for an operator to
+discover the same way.
 
 ## What was not done
 

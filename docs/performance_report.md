@@ -32,3 +32,57 @@ Structured-data and domain-calculation latency, measured locally against the ful
 |---|---|---|---|
 | full_snapshot_scan | 6.9032 | 7.3816 | 30 |
 | scoped_account_query | 3.0759 | 3.4057 | 30 |
+
+## API layer (Phase 6)
+
+Measured with `scripts/run_api_load_test.py` against the Dockerized API
+(`docker build . && docker run ...`), real pack, `MockProvider`, real
+HTTP round trips through the full ASGI stack - not the in-process
+function-call numbers above. **`MockProvider` latency is not production
+LLM latency** - `/api/chat`'s LLM-call time below is mock-call overhead
+only; no real network round trip to a model provider has been measured
+(no `ANTHROPIC_API_KEY` in this environment, consistent with every prior
+phase).
+
+**Single request, `/api/chat`** ("Is TKT-501 within its first-response
+SLA?"): total 23.98ms = tool/backend time 19.38ms (3 tool calls) + LLM
+(mock) time ~4.60ms.
+
+**Single request, action workflow** (real pack, `TKT-501`/`TKT-505`):
+prepare 125ms, confirm 81ms, execute 70ms - the same "commits its audit
+row to disk before returning" cost already documented above for the
+direct function calls, now measured through HTTP too.
+
+**Concurrency smoke test** (`scripts/run_api_load_test.py`, 1/5/10
+concurrent requests, single Docker container, one uvicorn worker):
+
+| Endpoint | Concurrency | req/s | p50 (ms) | p95 (ms) | max (ms) | Errors |
+|---|---|---|---|---|---|---|
+| /api/chat | 1 | 14.1 | 69.9 | 69.9 | 69.9 | 0 |
+| /api/chat | 5 | 52.3 | 89.6 | 91.8 | 94.3 | 0 |
+| /api/chat | 10 | 38.5 | 241.9 | 252.7 | 252.7 | 0 |
+| /api/radar/run | 1 | 4.5 | 224.0 | 224.0 | 224.0 | 0 |
+| /api/radar/run | 5 | 20.2 | 228.7 | 235.4 | 243.5 | 0 |
+| /api/radar/run | 10 | 7.4 | 1265.3 | 1302.4 | 1305.1 | 0 |
+
+Zero errors at every level - but only after a real bug found by this
+exact test was fixed (see below). Latency clearly degrades under
+concurrent load (`/api/radar/run` p50 goes from 224ms at concurrency 1 to
+1.27s at concurrency 10) - expected and already documented: SQLite here
+is single-writer, one uvicorn worker, no connection pool. This is a smoke
+test proving the API doesn't error under light concurrent load, not a
+capacity claim; scaling past this would mean more workers and/or a
+different datastore, not something this corpus size currently needs.
+
+**A real concurrency bug found and fixed this phase:** the first run of
+this exact test produced errors at concurrency 5 (3/5 failed) and 10
+(10/10 failed) with `sqlite3.ProgrammingError: SQLite objects created in
+a thread can only be used in that same thread`. Cause: FastAPI runs a
+sync dependency's setup/teardown and the route handler as separate
+`anyio` threadpool calls, which are not guaranteed to land on the same OS
+thread - `sqlite3.connect()`'s default `check_same_thread=True` then
+rejects the connection when a later step lands on a different thread.
+Fixed in `app/db/connection.py::connect()` with `check_same_thread=False`
+(safe here - every caller already gives each connection to exactly one
+logical owner at a time, never true concurrent access to one connection).
+Re-running the test after the fix: 0 errors at every level above.
