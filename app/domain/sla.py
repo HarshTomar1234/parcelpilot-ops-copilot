@@ -23,7 +23,13 @@ from app.domain.outcomes import Conflict, DecisionResult, TrustState
 from app.domain.severity import classify_severity
 from app.models.enums import Severity
 from app.models.structured import Account
-from app.policy.applicability import ClauseTopic, resolve_applicability
+from app.policy.applicability import (
+    AGREEMENT_OVERRIDES,
+    DEFAULT_SOURCE,
+    AgreementOverride,
+    ClauseTopic,
+    resolve_applicability,
+)
 from app.structured_data.repository import get_account, get_ticket
 from app.time.clock import SnapshotClock, tz_of
 
@@ -65,7 +71,13 @@ def _lookup_sla_target(
 
 
 def calculate_sla(
-    conn: sqlite3.Connection, ticket_id: str, auth: AuthContext, clock: SnapshotClock
+    conn: sqlite3.Connection,
+    ticket_id: str,
+    auth: AuthContext,
+    clock: SnapshotClock,
+    *,
+    overrides: tuple[AgreementOverride, ...] = AGREEMENT_OVERRIDES,
+    defaults: dict[ClauseTopic, tuple[str, str] | None] = DEFAULT_SOURCE,
 ) -> DecisionResult[SlaOutcome]:
     snapshot = clock.now()
     ticket = get_ticket(conn, ticket_id, auth, tz_of(clock))
@@ -84,7 +96,8 @@ def calculate_sla(
     severity = severity_result.result.severity
 
     applicability = resolve_applicability(
-        conn, ClauseTopic.SLA_FIRST_RESPONSE, account.account_id, snapshot.date()
+        conn, ClauseTopic.SLA_FIRST_RESPONSE, account.account_id, snapshot.date(),
+        overrides=overrides, defaults=defaults,
     )
     target = _lookup_sla_target(conn, applicability.winning_source_id, account, severity)
     if target is None:

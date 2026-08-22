@@ -76,7 +76,7 @@ AGREEMENT_OVERRIDES: tuple[AgreementOverride, ...] = (
 # (source_id, section) a topic falls back to when no agreement addresses it.
 # None means there is no default - the concept (e.g. an aggregate cap) only
 # exists because an agreement introduces it.
-_DEFAULT_SOURCE: dict[ClauseTopic, tuple[str, str] | None] = {
+DEFAULT_SOURCE: dict[ClauseTopic, tuple[str, str] | None] = {
     ClauseTopic.CANCELLATION_FEE: ("SRC-03", "1"),
     ClauseTopic.SERVICE_CREDIT_THRESHOLD_AND_AMOUNT: ("SRC-03", "2"),
     ClauseTopic.SERVICE_CREDIT_AGGREGATE_CAP: None,
@@ -98,11 +98,22 @@ class ApplicabilityResult(BaseModel):
 
 
 def resolve_applicability(
-    conn: sqlite3.Connection, topic: ClauseTopic, account_id: str, at: date
+    conn: sqlite3.Connection,
+    topic: ClauseTopic,
+    account_id: str,
+    at: date,
+    *,
+    overrides: tuple[AgreementOverride, ...] = AGREEMENT_OVERRIDES,
+    defaults: dict[ClauseTopic, tuple[str, str] | None] = DEFAULT_SOURCE,
 ) -> ApplicabilityResult:
-    default = _DEFAULT_SOURCE[topic]
+    """overrides/defaults default to the real registry above; tests inject a
+    separate fixture registry (tests/fixtures/seed_fixture_db.py) to prove
+    this function - and every domain module built on it - is generic over
+    the registry's *contents*, not hardcoded to the real pack's account/
+    source IDs (Phase 3 pre-flight 2.6)."""
+    default = defaults[topic]
     override = next(
-        (o for o in AGREEMENT_OVERRIDES if o.account_id == account_id and o.topic is topic), None
+        (o for o in overrides if o.account_id == account_id and o.topic is topic), None
     )
 
     if override is None:

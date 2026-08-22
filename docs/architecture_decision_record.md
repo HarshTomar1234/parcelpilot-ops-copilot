@@ -362,3 +362,40 @@ transient type retries and eventually succeeds; every permanent type
 raises on the first attempt with zero retries and zero backoff calls;
 retries exhaust and re-raise the transient error past `max_retries`; and
 backoff delays stay within the configured bounds.
+
+---
+
+## ADR-022 - Rules are declarative data, and the registries are injectable
+
+**Context.** Building a fixture-backed public CI tier (Phase 3 pre-flight
+2.1) meant proving `app/domain/*.py` works for an account/agreement pair
+that has never existed in the real pack. It didn't, at first: `_FEE_RULES`
+and `_CREDIT_RULES` were `{source_id: bespoke_python_function}` dispatch
+tables hardcoded to the real `SRC-03`/`SRC-05`/`SRC-06` - not a per-
+customer branch (2.6's literal example), but the same coupling one level
+more abstract, and it would `KeyError` on any fixture source_id.
+
+**Decision.** Rule *shapes* are now data: `CancellationFeeRule` (`kind:
+"threshold_fee" | "full_waiver"`, with parameters) and `ServiceCreditRule`
+(`kind: "percentage_with_cap" | "fixed_amount"`, with parameters) replace
+the bespoke functions. `resolve_applicability()`, `evaluate_cancellation()`,
+`evaluate_service_credit()`, and `calculate_sla()` all gained `overrides`/
+`defaults`/`fee_rules`/`credit_rules` keyword arguments defaulting to the
+real registries - production call sites never pass them; tests inject
+`tests/fixtures/seed_fixture_db.py`'s fabricated registries instead.
+
+**Verification, not assertion.** Every fixture number
+(`tests/fixture_backed/test_domain_rules.py`,
+`test_sla_and_severity.py`) was computed by actually running the real
+domain functions against the fixture data before being written into an
+assertion - not derived on paper and hoped to match. Re-ran the existing
+160 real-pack tests after the refactor (same numbers: `ORD-1001` fee
+`0.0`, `ORD-2001` fee `250.0`, `ORD-2002` credit `300.0`) to confirm the
+refactor changed nothing about real-pack behavior.
+
+**Consequence.** Adding a new real agreement is now a two-part *data*
+change (a `AgreementOverride` entry, a rule-shape entry) with zero new
+Python logic if the new agreement's rule fits an existing shape - and a
+new rule shape (a third `kind`) is the one case that still requires a
+code change, which is correct: that is a genuinely new kind of clause, not
+a new customer.
