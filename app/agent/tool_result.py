@@ -32,10 +32,14 @@ class ToolResult(BaseModel, Generic[T]):
     retryable: bool = False
     safe_message: str | None = None
     latency_ms: float = 0.0
+    attempts: int = 1
 
     @classmethod
-    def ok(cls, tool_name: str, output: T, latency_ms: float) -> ToolResult[T]:
-        return cls(tool_name=tool_name, success=True, output=output, latency_ms=latency_ms)
+    def ok(cls, tool_name: str, output: T, latency_ms: float, attempts: int = 1) -> ToolResult[T]:
+        return cls(
+            tool_name=tool_name, success=True, output=output,
+            latency_ms=latency_ms, attempts=attempts,
+        )
 
     @classmethod
     def fail(
@@ -45,6 +49,7 @@ class ToolResult(BaseModel, Generic[T]):
         safe_message: str,
         latency_ms: float,
         retryable: bool = False,
+        attempts: int = 1,
     ) -> ToolResult[T]:
         return cls(
             tool_name=tool_name,
@@ -53,4 +58,5 @@ class ToolResult(BaseModel, Generic[T]):
             safe_message=safe_message,
             retryable=retryable,
             latency_ms=latency_ms,
+            attempts=attempts,
         )
