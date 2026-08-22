@@ -20,6 +20,9 @@ from enum import StrEnum
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.authorization.context import AuthContext
+from app.detection.models import AlertCandidate, AlertType
+from app.detection.rules import DEFAULT_WINDOW_DAYS
+from app.detection.service import group_by_account, run_operations_radar
 from app.documents.retrieval import DocumentSearchFilter, DocumentSearchResult, search_documents
 from app.domain.cancellation import evaluate_cancellation
 from app.domain.outcomes import Conflict, DecisionResult, EvidenceRef, TrustState
@@ -279,4 +282,70 @@ def calculate_support_outcome_tool(
     )
     return CalculateSupportOutcomeResponse.from_decision(
         request.calculation_type, decision, latency_ms
+    )
+
+
+# ---------------------------------------------------------------------------
+# detect_issues (Phase 5 s10)
+# ---------------------------------------------------------------------------
+
+
+class DetectIssuesRequest(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    alert_types: list[AlertType] | None = None  # None = every rule
+    window_days: int = Field(default=DEFAULT_WINDOW_DAYS, ge=1, le=365)
+    # A further narrowing filter, never a widening one - always intersected
+    # with the caller's real auth.account_scope inside run_operations_radar()
+    # (via search_orders/search_tickets), so this field cannot be used to
+    # see an account the caller isn't already authorized to see.
+    account_scope: list[str] | None = None
+    group_by_account: bool = False
+
+
+class DetectIssuesResponse(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    alerts: list[AlertCandidate]
+    grouped_by_account: dict[str, list[str]] | None = None
+    latency_ms: float
+
+
+def detect_issues_tool(
+    conn: sqlite3.Connection,
+    request: DetectIssuesRequest,
+    auth: AuthContext,
+    clock: SnapshotClock,
+    context: RequestContext,
+) -> DetectIssuesResponse:
+    scoped_auth = auth
+    if request.account_scope is not None:
+        # Intersect, never union - a caller cannot widen their own scope by
+        # naming an account here that their real auth doesn't already cover.
+        allowed = {a for a in request.account_scope if auth.allows_account(a)}
+        scoped_auth = AuthContext(role=auth.role, account_scope=sorted(allowed))
+
+    start = time.perf_counter()
+    with span(
+        "tool.detect_issues", context,
+        alert_types=[t.value for t in request.alert_types] if request.alert_types else "all",
+        window_days=request.window_days,
+    ):
+        alerts = run_operations_radar(
+            conn, scoped_auth, clock,
+            alert_types=request.alert_types, window_days=request.window_days,
+        )
+    latency_ms = (time.perf_counter() - start) * 1000
+
+    grouped = group_by_account(alerts) if request.group_by_account else None
+
+    logger.info(
+        "tool.detect_issues",
+        extra={
+            "request_id": context.request_id, "trace_id": context.trace_id,
+            "alert_count": len(alerts), "latency_ms": round(latency_ms, 3),
+        },
+    )
+    return DetectIssuesResponse(
+        alerts=alerts, grouped_by_account=grouped, latency_ms=latency_ms
     )

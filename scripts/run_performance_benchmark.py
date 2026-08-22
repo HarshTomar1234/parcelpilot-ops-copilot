@@ -22,8 +22,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.actions.workflow import confirm_action, execute_action, prepare_escalation  # noqa: E402
-from app.authorization.context import INTERNAL_SYSTEM_CONTEXT  # noqa: E402
+from app.authorization.context import INTERNAL_SYSTEM_CONTEXT, AuthContext, Role  # noqa: E402
 from app.db.connection import connect  # noqa: E402
+from app.detection.service import run_operations_radar  # noqa: E402
 from app.domain.cancellation import evaluate_cancellation  # noqa: E402
 from app.domain.service_credit import evaluate_service_credit  # noqa: E402
 from app.domain.severity import classify_severity  # noqa: E402
@@ -95,6 +96,7 @@ def run_benchmark(source_dir: Path, db_path: Path) -> dict:
         _bench(results["classify_severity"], lambda t=ticket: classify_severity(t, conn))
 
     action_results = _bench_action_workflow(conn, ticket_ids, auth, clock)
+    detection_results = _bench_operations_radar(conn, account_ids, clock)
 
     conn.close()
     return {
@@ -107,7 +109,26 @@ def run_benchmark(source_dir: Path, db_path: Path) -> dict:
             name: {"p50_ms": round(t.p50, 4), "p95_ms": round(t.p95, 4), "count": t.count}
             for name, t in action_results.items()
         },
+        "operations_radar": {
+            name: {"p50_ms": round(t.p50, 4), "p95_ms": round(t.p95, 4), "count": t.count}
+            for name, t in detection_results.items()
+        },
     }
+
+
+def _bench_operations_radar(conn, account_ids: list[str], clock) -> dict[str, Timings]:
+    """Phase 5 s15: full-snapshot detection vs. a single-account-scoped
+    query, both against the real pack."""
+    results = {"full_snapshot_scan": Timings(), "scoped_account_query": Timings()}
+    for _ in range(REPETITIONS):
+        with results["full_snapshot_scan"].measure():
+            run_operations_radar(conn, INTERNAL_SYSTEM_CONTEXT, clock)
+    if account_ids:
+        scoped_auth = AuthContext(role=Role.SUPPORT_AGENT, account_scope=[account_ids[0]])
+        for _ in range(REPETITIONS):
+            with results["scoped_account_query"].measure():
+                run_operations_radar(conn, scoped_auth, clock)
+    return results
 
 
 def _bench_action_workflow(conn, ticket_ids: list[str], auth, clock) -> dict[str, Timings]:
@@ -179,6 +200,20 @@ def render_report(result: dict) -> str:
         "|---|---|---|---|",
     ]
     for name, stats in result["action_workflow"].items():
+        lines.append(f"| {name} | {stats['p50_ms']} | {stats['p95_ms']} | {stats['count']} |")
+
+    lines += [
+        "",
+        "## Operations Radar (Phase 5)",
+        "",
+        "`full_snapshot_scan` runs every detection rule unrestricted (all accounts); "
+        "`scoped_account_query` runs the same with the caller restricted to one account. "
+        "Both measured against the real pack, not the fixture corpus.",
+        "",
+        "| Operation | p50 (ms) | p95 (ms) | n |",
+        "|---|---|---|---|",
+    ]
+    for name, stats in result["operations_radar"].items():
         lines.append(f"| {name} | {stats['p50_ms']} | {stats['p95_ms']} | {stats['count']} |")
     return "\n".join(lines) + "\n"
 

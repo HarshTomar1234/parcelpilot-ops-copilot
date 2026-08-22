@@ -1,12 +1,12 @@
-"""Controlled tool registry (Phase 3 s7, Phase 4 pre-flight 1B). Only names
-in TOOL_REGISTRY can be invoked; execute_tool() is the single dispatch
-point that wraps the three existing typed tool contracts (app/agent/
-tools.py) and normalizes every outcome into a ToolResult (s8) - no
-repository, domain module, or raw SQL is ever exposed to a planner/model
-directly.
+"""Controlled tool registry (Phase 3 s7, Phase 4 pre-flight 1B, Phase 5
+s10 adds a fourth tool). Only names in TOOL_REGISTRY can be invoked;
+execute_tool() is the single dispatch point that wraps the typed tool
+contracts (app/agent/tools.py) and normalizes every outcome into a
+ToolResult (s8) - no repository, domain module, detection rule, or raw
+SQL is ever exposed to a planner/model directly.
 
 Timeout: enforced by measuring actual elapsed wall-clock time against
-spec.timeout_seconds. All three tools today are local, synchronous SQLite
+spec.timeout_seconds. All four tools today are local, synchronous SQLite
 operations against a connection created with the sqlite3 default
 check_same_thread=True (app/db/connection.py, unchanged this phase) -
 that thread-affinity rules out a safe preemptive/threaded interrupt
@@ -18,10 +18,10 @@ connection + worker thread if a genuinely long-running or network-bound
 tool is ever added.
 
 Retry: bounded, only for a tool whose ToolSpec.retryable=True AND whose
-failure classifies as transient (currently just TIMEOUT). All three
+failure classifies as transient (currently just TIMEOUT). All four
 current tools are deterministic local reads with no transient failure
 mode - retrying a deterministic failure just fails again, identically -
-so all three are retryable=False by design. The retry loop itself is
+so all four are retryable=False by design. The retry loop itself is
 implemented and unit-tested (via an injectable sleep function, same
 pattern as app/llm/anthropic_provider.py's backoff), so it is real, not
 vestigial, ready for a future I/O-bound tool.
@@ -40,11 +40,14 @@ from app.agent.tool_result import ToolErrorType, ToolResult
 from app.agent.tools import (
     CalculateSupportOutcomeRequest,
     CalculateSupportOutcomeResponse,
+    DetectIssuesRequest,
+    DetectIssuesResponse,
     LookupStructuredDataRequest,
     LookupStructuredDataResponse,
     SearchDocumentsRequest,
     SearchDocumentsResponse,
     calculate_support_outcome_tool,
+    detect_issues_tool,
     lookup_structured_data_tool,
     search_documents_tool,
 )
@@ -98,6 +101,16 @@ TOOL_REGISTRY: dict[str, ToolSpec] = {
         retryable=False,  # deterministic - retrying a failure won't change the answer
         evidence_bearing=True,
     ),
+    "detect_issues": ToolSpec(
+        name="detect_issues",
+        description="Deterministic Operations Radar alerts (SLA/recurring/known-issue/carrier).",
+        input_model=DetectIssuesRequest,
+        output_model=DetectIssuesResponse,
+        requires_auth=True,
+        timeout_seconds=10.0,
+        retryable=False,  # deterministic - retrying a failure won't change the answer
+        evidence_bearing=True,
+    ),
 }
 
 _ERROR_MAP: dict[type[Exception], ToolErrorType] = {
@@ -135,8 +148,11 @@ def _dispatch(
         if name == "lookup_structured_data":
             assert isinstance(request, LookupStructuredDataRequest)
             return lookup_structured_data_tool(conn, request, auth, clock, context)
-        assert isinstance(request, CalculateSupportOutcomeRequest)
-        return calculate_support_outcome_tool(conn, request, auth, clock, context)
+        if name == "calculate_support_outcome":
+            assert isinstance(request, CalculateSupportOutcomeRequest)
+            return calculate_support_outcome_tool(conn, request, auth, clock, context)
+        assert isinstance(request, DetectIssuesRequest)
+        return detect_issues_tool(conn, request, auth, clock, context)
 
 
 def execute_tool(
