@@ -86,3 +86,38 @@ Fixed in `app/db/connection.py::connect()` with `check_same_thread=False`
 (safe here - every caller already gives each connection to exactly one
 logical owner at a time, never true concurrent access to one connection).
 Re-running the test after the fix: 0 errors at every level above.
+
+## Final validation phase (red team, concurrency + races)
+
+Re-measured against a freshly rebuilt Docker image (real pack,
+`MockProvider`):
+
+| Endpoint | Concurrency | req/s | p50 (ms) | p95 (ms) | max (ms) | Errors |
+|---|---|---|---|---|---|---|
+| /api/chat | 1 | 17.8 | 55.2 | 55.2 | 55.2 | 0 |
+| /api/chat | 5 | 46.0 | 91.6 | 93.4 | 106.7 | 0 |
+| /api/chat | 10 | 35.2 | 264.9 | 274.2 | 281.2 | 0 |
+| /api/radar/run | 1 | 5.4 | 184.6 | 184.6 | 184.6 | 0 |
+| /api/radar/run | 5 | 22.9 | 199.6 | 204.8 | 217.5 | 0 |
+| /api/radar/run | 10 | 8.4 | 1178.2 | 1189.3 | 1191.8 | 0 |
+
+**Action confirm/execute race, same action, 20 concurrent HTTP requests**
+(the highest-priority check this phase - see
+[`red_team_report.md`](red_team_report.md) F1 for the full writeup):
+
+- `/api/actions/confirm`: **before the fix**, 4 of 20 concurrent requests
+  all reported `success: true` for what should be a single valid
+  transition. **After** the atomic compare-and-swap fix
+  (`app/actions/store.py::save_action_if_status`): exactly 1 of 20
+  succeeds, the other 19 get `error_code=wrong_state` - re-verified
+  against both the fixture-backed test suite and a live rebuilt
+  container.
+- `/api/actions/execute`: all 20 concurrent requests report
+  `success: true` (correct - execution is documented idempotent), but
+  only one of them performs the real `CONFIRMED -> EXECUTED` transition;
+  the other 19 detect they lost the race and return the already-executed
+  record instead of a second, redundant write.
+
+No corrupted audit record, no duplicate row, in either case - verified by
+reading the `actions` table directly after the race, not just trusting
+the HTTP responses.

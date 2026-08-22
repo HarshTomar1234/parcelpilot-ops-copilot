@@ -8,8 +8,9 @@ here is estimated or projected.
 
 | Suite | Real pack | No pack (hosted CI) |
 |---|---|---|
-| Full `pytest` | 331 passed | 217 passed, 114 skipped, 0 failed |
+| Full `pytest` | 445 passed | 331 passed, 114 skipped, 0 failed |
 | `tests/fixture_backed/` only | 150 passed | 150 passed (never skips - see below) |
+| `tests/red_team/` only | 114 passed | 114 passed (never skips - never needs the real pack) |
 
 (Requires the `api` extra - `pip install -e ".[dev,llm,evaluation,api]"` -
 since `tests/fixture_backed/` now exercises `app/api/` via FastAPI's
@@ -229,6 +230,59 @@ latency); a real judge-scored evaluation of the API layer's answers
 (the existing DeepEval/agent-trajectory limitation above applies
 identically here, since `/api/chat` calls the same `run_agent()`).
 
+## Red team (final validation phase)
+
+Full report: [`red_team_report.md`](red_team_report.md). Summary:
+
+- **Total attacks (executable tests):** 114, across 10 classes -
+  identity spoofing, API authorization, the action attack matrix, prompt
+  injection (question + retrieved document), tool argument injection,
+  information leakage/enumeration/aggregate leakage, invalid input,
+  deployment failure scenarios, concurrency/race conditions, and
+  agent/retrieval abuse.
+- **Passed:** 114 / 114.
+- **Failed (before fix):** 2 real issues found and fixed before this
+  report was written - a confirm/execute race condition (4 of 20
+  concurrent confirmations on one action all reported success) and a
+  Docker entrypoint that crashed the whole container on an invalid
+  base64 secret instead of starting degraded. Both re-verified fixed
+  against a real rebuilt container, not just the test suite.
+- **Residual limitations:** the lexical relevance floor doesn't fully
+  filter every off-topic query on a small corpus (never fabricates a
+  confident answer either way); an authenticated-but-unauthorized caller
+  can technically distinguish "this action exists" from "it never did"
+  via 403-vs-404, though no action content leaks either way.
+
+## Deployment (final validation phase)
+
+- **Docker build:** succeeds from a clean layer cache in ~30s.
+- **Startup:** verified against a real running container for all of:
+  valid database (writable mount, `PARCELPILOT_DB_B64_FILE`, and
+  `PARCELPILOT_DB_B64`), missing database, corrupt database file,
+  read-only database mount, invalid base64 secret, and no configuration
+  at all. `/health` stays up in every case; `/ready` reports the real
+  state honestly; no case fabricates data or crashes the process (after
+  the entrypoint fix above).
+- **API smoke tests:** `/api/chat`, `/api/radar/run`, and the full
+  `/api/actions/{prepare,confirm,execute}` chain all verified against a
+  live container with the real, ingested database.
+
+## Concurrency (final validation phase)
+
+Measured with `scripts/run_api_load_test.py` against a live Docker
+container, real pack, `MockProvider` (see
+[`performance_report.md`](performance_report.md) for the full table):
+
+| Endpoint | Concurrency | Errors |
+|---|---|---|
+| `/api/chat` | 1, 5, 10 | 0 |
+| `/api/radar/run` | 1, 5, 10 | 0 |
+| `/api/actions/confirm` (same action, race) | 20 | 0 crashes; exactly 1 of 20 succeeds (correct) |
+| `/api/actions/execute` (same action, race) | 20 | 0 crashes; all report success (idempotent by design), exactly 1 real transition |
+
+This is a regression/smoke test at this corpus size, not a production
+scalability claim.
+
 ## Release gates
 
 Per [`quality_gates.md`](quality_gates.md):
@@ -236,8 +290,8 @@ Per [`quality_gates.md`](quality_gates.md):
 | Gate | Status |
 |---|---|
 | 0 unauthorized access | Met - all security tests pass, including the action workflow's |
-| 0 unsafe actions | Met - every action security scenario fails safely with a structured error, never a silent success or a duplicated effect |
-| 0 deterministic regressions | Met - 331/331 pytest, including the full domain, Operations Radar, and API-layer suites |
+| 0 unsafe actions | Met - every action security scenario fails safely with a structured error, never a silent success or a duplicated effect; concurrent confirm/execute races closed via atomic compare-and-swap (see red_team_report.md F1) |
+| 0 deterministic regressions | Met - 445/445 pytest, including the full domain, Operations Radar, API-layer, and red-team suites |
 | 0 invalid required citations | Met - an invalid citation gets one bounded repair attempt, then a controlled `evidence_validation_failed` result if still invalid - never a silently-edited answer shown as valid |
 | RAG/agent quality thresholds | **Not set** - no real judge-scored baseline exists yet (MockProvider limitation) |
 

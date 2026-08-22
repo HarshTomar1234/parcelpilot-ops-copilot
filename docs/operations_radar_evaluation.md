@@ -26,9 +26,9 @@ Real-pack detection run. Provider: `mock` / model `mock-model`. Every alert belo
 
 | Alert ID | Tokens | Latency (ms) | Cost (USD) |
 |---|---|---|---|
-| ALERT-811fa8dad17e59cb | 336 | 0.0385 | 0.000000 |
-| ALERT-918d92569e8d048a | 336 | 0.0305 | 0.000000 |
-| ALERT-83352af2fbf0c38e | 347 | 0.0308 | 0.000000 |
-| ALERT-cd5ef8aadc656a5a | 334 | 0.0283 | 0.000000 |
-| ALERT-24cbaad4aaacdbf7 | 351 | 0.0285 | 0.000000 |
-| ALERT-e4a5525c71160f55 | 352 | 0.028 | 0.000000 |
+| ALERT-811fa8dad17e59cb | 336 | 0.0483 | 0.000000 |
+| ALERT-918d92569e8d048a | 336 | 0.0363 | 0.000000 |
+| ALERT-83352af2fbf0c38e | 347 | 0.0315 | 0.000000 |
+| ALERT-cd5ef8aadc656a5a | 334 | 0.0308 | 0.000000 |
+| ALERT-24cbaad4aaacdbf7 | 351 | 0.0297 | 0.000000 |
+| ALERT-e4a5525c71160f55 | 352 | 0.0407 | 0.000000 |

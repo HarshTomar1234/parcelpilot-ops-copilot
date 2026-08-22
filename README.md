@@ -118,9 +118,15 @@ Full rationale for every decision:
   retrieved documents, and the full action-workflow attack list
   (unauthorized/cross-account targets, expired/replayed confirmation, a
   manipulated payload).
+- **Red team** (`tests/red_team/`, 114 tests, public, always-runs CI
+  tier) - identity spoofing, API authorization, action attacks,
+  concurrency/race conditions, deployment failure scenarios, and more,
+  run as executable adversarial tests against the real HTTP API and a
+  live Docker container, not documented as threats:
+  [`docs/red_team_report.md`](docs/red_team_report.md).
 - **Performance** - structured-data/domain-calculation latency,
   Operations Radar detection latency, and end-to-end API latency
-  (including a basic concurrency smoke test):
+  (including a concurrency smoke test):
   [`docs/performance_report.md`](docs/performance_report.md).
 
 Full consolidated results, with MEASURED vs. NOT AVAILABLE stated
@@ -219,6 +225,10 @@ Test tiers (`tests/`):
   rules, authorization, retrieval, the full action workflow, Operations
   Radar, the HTTP API layer (`app/api/`), and security regressions,
   against a fabricated dataset. Never needs the real pack, never skips.
+- `tests/red_team/` - executable adversarial tests (identity spoofing,
+  authorization attacks, action attacks, concurrency/race conditions,
+  deployment failure scenarios) against the same fabricated dataset.
+  Public, always-runs CI tier, never skips.
 - `tests/unit/`, `tests/integration/`, `tests/regression/`,
   `tests/evaluation/` - use the real source pack via
   `PARCELPILOT_SOURCE_DIR`, skipping gracefully (not failing) when it's
@@ -252,10 +262,14 @@ independently verified.
 - `AnthropicProvider` and its gateway fallback are construction/unit-
   tested only; no live API call has been exercised (no key available
   while building this).
-- SQLite is single-writer with one connection per request, no pool - fine
-  at this corpus size (see the concurrency smoke test in
-  [`docs/performance_report.md`](docs/performance_report.md)), not a
-  concurrency design for a larger one.
+- SQLite is single-writer with one connection per request, no pool -
+  every action-workflow state transition is a single atomic conditional
+  `UPDATE`, so concurrent requests are *correct* (verified under real
+  20-way concurrency - see
+  [`docs/red_team_report.md`](docs/red_team_report.md)), but latency
+  still degrades under load at this corpus size (see
+  [`docs/performance_report.md`](docs/performance_report.md)) - not a
+  throughput design for a much larger one.
 - No conversation memory - each question is answered independently, and
   the staff UI's demo-identity picker is a hosted-assessment stand-in for
   a real identity provider, not a design for one.

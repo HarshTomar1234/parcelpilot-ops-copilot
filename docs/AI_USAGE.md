@@ -3,10 +3,12 @@
 Built with Claude (Anthropic) via Claude Code across all phases: agent
 orchestration (Phase 3), agent hardening plus the state-changing action
 workflow (Phase 4), Operations Radar deterministic detection (Phase 5),
-and the FastAPI/staff-UI product surface plus deployment (Phase 6). This
-note covers what Claude Code actually did, in the specific and verifiable
-sense: which commands were run, what they found, and what changed as a
-result - not a general disclosure.
+the FastAPI/staff-UI product surface plus deployment (Phase 6), and a
+final red-team/release-validation pass (`tests/red_team/`, 114
+adversarial tests, plus manual attacks against a live Docker container).
+This note covers what Claude Code actually did, in the specific and
+verifiable sense: which commands were run, what they found, and what
+changed as a result - not a general disclosure.
 
 ## What was AI-assisted
 
@@ -30,6 +32,12 @@ error handling), the static staff UI (`app/api/static/`), `Dockerfile` /
 `docker-entrypoint.sh`, `scripts/run_api_load_test.py`, the API test
 suite, and this phase's documentation updates.
 
+Final red-team phase: `tests/red_team/` (10 files, 114 executable
+adversarial tests), the atomic compare-and-swap fix in
+`app/actions/store.py`/`app/actions/workflow.py`, the
+`docker-entrypoint.sh` crash-on-bad-secret fix, `docs/red_team_report.md`,
+and this phase's evaluation/performance/README updates.
+
 ## What was verified, not assumed
 
 Every claim of "done" in this phase's docs and the private phase report
@@ -39,9 +47,15 @@ corresponds to a command that was actually run:
   writing it, not just at the end.
 - Every new test file was run in isolation before being folded into the
   full suite.
-- The full suite was run repeatedly through every phase (331 passed with
-  the real pack; 217 passed / 114 skipped / 0 failed with none, as of
-  Phase 6) to catch regressions as work progressed, not once at the end.
+- The full suite was run repeatedly through every phase (445 passed with
+  the real pack; 331 passed / 114 skipped / 0 failed with none, as of the
+  final red-team phase) to catch regressions as work progressed, not once
+  at the end.
+- The confirm/execute race-condition fix (below) was verified three
+  separate ways before being called done: a deterministic direct-function
+  test, an HTTP-level `TestClient` test under real thread concurrency,
+  and a manual 20-concurrent-request attack against a live, rebuilt
+  Docker container - not just one of the three.
 - The Docker image was actually built and run this phase (not just
   authored) - `docker build`, then `docker run` against the real,
   ingested database via all three documented delivery mechanisms (file
@@ -109,6 +123,37 @@ read-only breaks `prepare_escalation`'s audit-row write - not a code bug,
 but a real deployment-configuration trap now documented explicitly in
 the README and `docker-entrypoint.sh` rather than left for an operator to
 discover the same way.
+
+The final red-team phase found two real bugs by actually attacking a
+live system, not by inspection - full writeup in
+[`docs/red_team_report.md`](red_team_report.md):
+
+1. A genuine confirm/execute race condition: `app/actions/workflow.py`
+   checked an action's status in Python, then wrote unconditionally -
+   under real concurrent HTTP load, 4 of 20 concurrent `confirm_action`
+   calls on the *same* action all reported success. Fixed with an atomic
+   `UPDATE ... WHERE status = expected` compare-and-swap
+   (`app/actions/store.py::save_action_if_status`), re-verified at
+   exactly 1 of 20 succeeding, on both the test suite and a live
+   container.
+2. `docker-entrypoint.sh` crashed the entire container (no `/health`, no
+   `/ready`, nothing) when given an invalid base64 secret - the opposite
+   of the phase's own "no startup crash if only readiness is unavailable"
+   requirement. Found by deliberately supplying a malformed secret to a
+   real container and getting `curl: (7) Failed to connect` instead of a
+   graceful `not_ready`. Fixed by making the decode step fail soft
+   (log a warning, continue starting) instead of exiting the whole
+   script.
+
+A third, lower-severity gap was found and left as a documented, accepted
+trade-off rather than "fixed" by a redesign: `GET /api/actions/{id}`
+returns 403 for an action that exists but belongs to someone else, versus
+404 for one that never existed - the ownership check reads the record
+before deciding, so its bare existence (not its contents) is technically
+distinguishable. Recorded as a known limitation
+(`docs/red_team_report.md` F5), consistent with the instruction to keep
+the existing single-row audit design unless a test demonstrates it's
+unsafe, not to redesign preemptively.
 
 ## What was not done
 
