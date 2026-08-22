@@ -1,0 +1,79 @@
+name: AI Evaluation
+
+# Runs the LLM-judged DeepEval suite plus the deterministic retrieval
+# evaluation, and logs both to MLflow. Manually triggered, never on every
+# push (Phase 2 s19: "do not run expensive LLM evaluations on every local
+# micro-change if unnecessary").
+#
+# Requires two things this repository does not provide by default:
+#   1. ANTHROPIC_API_KEY - a real key, for the judge model.
+#   2. The assessment source pack - never committed (AGENTS.md rule 18).
+#      To run this workflow, a maintainer with access to the pack sets the
+#      repository secret PARCELPILOT_SOURCE_PACK_B64 to a base64 encoding
+#      of the *contents* of source-pack/ (not the folder itself):
+#        (cd source-pack && zip -r - .) | base64 -w0
+#      Without both secrets set, this workflow fails at the explicit check
+#      step below rather than silently reporting fake results.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Create venv and install dependencies
+        run: |
+          uv venv .venv
+          uv pip install --python .venv/bin/python -e ".[dev,llm,evaluation]"
+
+      - name: Check required secrets are set
+        run: |
+          if [ -z "${{ secrets.PARCELPILOT_SOURCE_PACK_B64 }}" ]; then
+            echo "::error::PARCELPILOT_SOURCE_PACK_B64 is not set - this workflow cannot run without the source pack, which is never committed."
+            exit 1
+          fi
+          if [ -z "${{ secrets.ANTHROPIC_API_KEY }}" ]; then
+            echo "::error::ANTHROPIC_API_KEY is not set - required for a real judge/answer model."
+            exit 1
+          fi
+
+      - name: Decode source pack
+        env:
+          PACK_B64: ${{ secrets.PARCELPILOT_SOURCE_PACK_B64 }}
+        run: |
+          mkdir -p /tmp/source-pack
+          echo "$PACK_B64" | base64 -d > /tmp/pack.zip
+          unzip -q /tmp/pack.zip -d /tmp/source-pack
+
+      - name: Retrieval evaluation
+        run: .venv/bin/python scripts/run_retrieval_eval.py --source-dir /tmp/source-pack --mlflow
+
+      - name: DeepEval baseline
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          DEEPEVAL_TELEMETRY_OPT_OUT: "YES"
+        run: .venv/bin/python scripts/run_deepeval_baseline.py --source-dir /tmp/source-pack --provider anthropic --model claude-sonnet-5 --mlflow
+
+      - name: Golden domain regression
+        env:
+          PARCELPILOT_SOURCE_DIR: /tmp/source-pack
+        run: .venv/bin/python -m pytest tests/evaluation -v
+
+      - name: Upload evaluation reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: evaluation-reports
+          path: |
+            docs/retrieval_evaluation.md
+            docs/deepeval_baseline.md
