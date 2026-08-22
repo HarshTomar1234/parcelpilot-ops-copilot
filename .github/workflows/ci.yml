@@ -4,16 +4,26 @@ name: CI
 # No LLM calls happen here - MockProvider only - so this is safe to run on
 # every push/PR with no secrets and no external network access.
 #
-# IMPORTANT: the assessment source pack (data/source_manifest.json's real
-# PDFs + workbook) is never committed (AGENTS.md rule 18) and this repo has
-# no secret wired to supply it, so on GitHub-hosted runners every test that
-# depends on the `source_dir`/`conn`/`clock`/`auth` fixtures will report
-# SKIPPED, not PASSED - tests/conftest.py's _find_source_dir() returns None
-# and pytest.skip()s, by design (see docs/data_dictionary.md's Phase 1
-# design and README's Testing section). Lint, type checking, and the
-# pack-independent unit tests (parsing/normalization logic, the LLM
-# gateway, prompt registry, MLflow tracking, DeepEval harness) still run
-# and still catch real regressions.
+# Two test tiers (Phase 3 pre-flight 2.1):
+#   - tests/fixture_backed/ runs against a fabricated, version-controlled
+#     dataset (tests/fixtures/seed_fixture_db.py) and is GUARANTEED to run
+#     and pass here - it never needs the real source pack. This is the
+#     public, always-runs "deterministic domain / security / regression"
+#     tier, not a substitute for real evaluation - see
+#     tests/fixture_backed/README.md.
+#   - Everything else (tests/unit, tests/integration, tests/regression,
+#     tests/evaluation) uses the source_dir/conn/clock/auth fixtures in
+#     tests/conftest.py, which skip.gracefully when PARCELPILOT_SOURCE_DIR
+#     is unset - the confidential assessment pack is never committed
+#     (AGENTS.md rule 18) and this repo has no secret wired to supply it on
+#     hosted runners. Verified locally: with no pack available, the full
+#     suite reports "84 passed, 101 skipped, 0 failed" - lint, type
+#     checking, and every pack-independent test (parsing/normalization
+#     logic, the LLM gateway, prompt registry, MLflow tracking, DeepEval
+#     harness, and the entire fixture_backed/ tier) still run and still
+#     catch real regressions.
+#
+# Real, protected evaluation against the actual pack lives in eval.yml.
 
 on:
   push:
@@ -43,9 +53,12 @@ jobs:
         run: .venv/bin/python -m ruff check app scripts tests
 
       - name: Pyright
-        run: .venv/bin/python -m pyright app scripts/ingest_sources.py scripts/run_retrieval_eval.py scripts/run_deepeval_baseline.py tests
+        run: .venv/bin/python -m pyright app scripts/ingest_sources.py scripts/run_retrieval_eval.py scripts/run_deepeval_baseline.py scripts/run_performance_benchmark.py tests
 
-      - name: Pytest
+      - name: Public fixture-backed tests (must all pass, never skip)
+        run: .venv/bin/python -m pytest tests/fixture_backed -v
+
+      - name: Full pytest suite (protected tests skip without the real pack)
         env:
           DEEPEVAL_TELEMETRY_OPT_OUT: "YES"
         run: .venv/bin/python -m pytest -v
