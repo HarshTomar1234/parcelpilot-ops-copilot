@@ -1,0 +1,26 @@
+# Never let the confidential source pack or a local database into a
+# build context (belt-and-suspenders alongside .gitignore).
+*.pdf
+*.xlsx
+*.docx
+data/source-pack/
+data/raw/
+*.db
+*.sqlite
+*.sqlite3
+build/
+
+.git/
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+mlruns/
+mlartifacts/
+docs/_internal/
+tests/
+.env
+.env.*
+!.env.example

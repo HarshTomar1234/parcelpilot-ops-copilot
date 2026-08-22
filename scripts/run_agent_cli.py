@@ -18,7 +18,6 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import os
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -29,28 +28,9 @@ from app.agent.context import AgentRequestContext  # noqa: E402
 from app.agent.orchestrator import run_agent  # noqa: E402
 from app.authorization.context import AuthContext, Role  # noqa: E402
 from app.db.connection import connect  # noqa: E402
-from app.llm.base import LLMProvider  # noqa: E402
+from app.llm.factory import build_default_provider  # noqa: E402
 from app.llm.gateway import ParcelPilotLLMGateway  # noqa: E402
-from app.llm.mock_provider import MockProvider  # noqa: E402
 from app.observability.tracing import RequestContext  # noqa: E402
-
-
-def _build_provider(live: bool, model: str) -> tuple[LLMProvider, str]:
-    if not live:
-        return MockProvider(), "mock-model"
-
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if not api_key:
-        raise SystemExit(
-            "--live requires ANTHROPIC_API_KEY to be set; refusing to fabricate a result"
-        )
-
-    from app.llm.anthropic_provider import AnthropicProvider
-
-    gateway = ParcelPilotLLMGateway(
-        [(AnthropicProvider(api_key=api_key), model), (MockProvider(), "mock-model")]
-    )
-    return gateway, model
 
 
 def main() -> int:
@@ -79,7 +59,10 @@ def main() -> int:
     scope = args.account_scope.split(",") if args.account_scope else None
     auth = AuthContext(role=Role(args.role), account_scope=scope)
 
-    provider, model = _build_provider(args.live, args.model)
+    try:
+        provider, model = build_default_provider(args.live, args.model)
+    except RuntimeError as exc:
+        raise SystemExit(str(exc)) from exc
     rc = RequestContext.new()
     ctx = AgentRequestContext(
         request_id=rc.request_id, trace_id=rc.trace_id, user_id="cli-user",
