@@ -17,6 +17,17 @@ def test_meridian_p1_breaches_under_its_agreement(conn, auth, clock):
     assert result.conflicts and result.conflicts[0].winner_source_id == "FIX-05"
 
 
+def test_p1_breach_is_confident_trust_with_a_separate_human_review_flag(conn, auth, clock):
+    """Phase 4 s5: epistemic trust (is the calculation itself certain?) and
+    operational follow-up (should a human be routed to this?) are
+    independent signals. A P1 breach is confidently a breach - the
+    calculation is not in doubt - while also needing operational
+    escalation. Neither one may be collapsed into the other."""
+    result = calculate_sla(conn, "FXT-501", auth, clock, **_REGISTRY)
+    assert result.trust_state is TrustState.CONFIDENT
+    assert result.needs_human_review is True
+
+
 def test_vertex_p1_breaches_under_default_no_agreement(conn, auth, clock):
     result = calculate_sla(conn, "FXT-505", auth, clock, **_REGISTRY)
     assert result.result is not None
