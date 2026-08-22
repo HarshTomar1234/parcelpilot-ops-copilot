@@ -1,9 +1,10 @@
 # Architecture Note: The Agent Layer
 
 This note covers `app/agent/` (the bounded question-answering state
-machine) and `app/actions/` (the state-changing action workflow) on top
-of the deterministic domain layer and tool contracts. For the
-domain/retrieval/policy architecture underneath it, see
+machine), `app/actions/` (the state-changing action workflow), and
+`app/detection/` (Operations Radar, proactive deterministic issue
+detection) on top of the deterministic domain layer and tool contracts.
+For the domain/retrieval/policy architecture underneath it, see
 [`architecture_decision_record.md`](architecture_decision_record.md).
 
 ## The one rule
@@ -99,12 +100,13 @@ how it was found and fixed.
 
 ## Tool boundary
 
-Three tools, typed request/response contracts, each Pydantic-validated
+Four tools, typed request/response contracts, each Pydantic-validated
 before dispatch: `search_documents`, `lookup_structured_data`,
-`calculate_support_outcome`. No repository, domain module, or raw SQL is
-ever exposed to the planner directly - `app/agent/registry.py::execute_tool`
-is the only dispatch point, and authorization is enforced inside the real
-tool functions (never re-derived from the tool's own arguments - auth is
+`calculate_support_outcome`, `detect_issues` (Operations Radar). No
+repository, domain module, detection rule, or raw SQL is ever exposed to
+the planner directly - `app/agent/registry.py::execute_tool` is the only
+dispatch point, and authorization is enforced inside the real tool
+functions (never re-derived from the tool's own arguments - auth is
 always the trusted, backend-supplied second parameter).
 
 Entity resolution runs *before* planning and drops anything the caller
@@ -150,15 +152,53 @@ reaches the user only as text in the composed answer (via the
 and executing an action is a separate operation this phase, outside the
 question-answering loop.
 
+## Operations Radar
+
+`app/detection/` finds operational issues before an operator asks about
+them, following one pipeline: structured data -> deterministic rules
+(`rules.py`) -> candidate alerts -> authorization filtering (already
+applied, since every rule reads through the same account-scoped
+`search_orders()`/`search_tickets()` the rest of the app uses) ->
+optional LLM summary (`summary.py`) -> operator alert. The LLM never
+decides a count, threshold, affected account, severity, or whether an
+issue exists - every `AlertCandidate` field is set by a rule in
+`rules.py` before an LLM is ever called; the optional summary is prose
+only, over an object it cannot write back to (`app/detection/models.py`
+is frozen).
+
+Six rules today: SLA breach, SLA approaching (both point-in-time, one
+alert per ticket), recurring high-severity volume, known-issue pattern
+(matches active - never resolved - known issues against ticket text by
+shared vocabulary), carrier-fault pattern, and overdue pickup. Every
+rule's threshold and window are named constants in `rules.py`, not
+inlined magic numbers, and every alert's `alert_id` is a deterministic
+fingerprint (`app/detection/fingerprint.py`: sha256 of alert type, time
+window, rule version, and the sorted affected-entity set) - re-running
+detection against unchanged data reproduces the same IDs, never
+duplicates.
+
+`detect_issues` is the tool boundary's name for `run_operations_radar()`
+(`app/detection/service.py`), matching the golden evaluation dataset's
+own pre-existing expected tool name rather than an earlier internal
+working name. A `restricted_support` caller is denied the entire
+capability (not just filtered down) - the only role check in the
+codebase beyond account-scope filtering, since no field in this schema
+is more sensitive than the account-scoped record it already lives on.
+
 ## What this deliberately does not do
 
-No multi-turn conversation memory. No bulk/aggregate queries across many
-records - the planner is single-entity per request. No frontend beyond a
-CLI dev harness (`scripts/run_agent_cli.py`). No Operations Radar. No
-Airflow/scheduler - nothing here has the multi-stage, scheduled work a
-DAG orchestrator is for. No second action type beyond `prepare_escalation`
-- a ticket-update action was explicitly optional and wasn't built. These
-are later-phase scope, not oversights.
+No multi-turn conversation memory. No bulk/aggregate question-answering
+across many records in the agent's own pipeline (Operations Radar's
+detection rules are the aggregate-reasoning surface; the agent's planner
+is still single-entity per request). No frontend beyond a CLI dev harness
+(`scripts/run_agent_cli.py`) and an evaluation script for Operations
+Radar (`scripts/run_operations_radar_eval.py`). No Airflow/scheduler -
+nothing here has the multi-stage, scheduled work a DAG orchestrator is
+for. No second action type beyond `prepare_escalation` - a ticket-update
+action was explicitly optional and wasn't built. No alert-to-action
+automation - an alert's `recommended_next_step` is text only; nothing in
+`app/detection/` can call `prepare_escalation`. These are later-phase
+scope, not oversights.
 
 ## Known limitations
 
@@ -169,6 +209,14 @@ are later-phase scope, not oversights.
 - The action-eligibility rule (P1 or breached) is intentionally narrow;
   it does not account for account-level agreement terms the way the
   cancellation/service-credit calculators do.
+- Known-issue matching is a token-overlap heuristic, not a learned or
+  exact classifier - real, but imperfect; one false positive was found
+  and fixed during development (see the private phase report), and a
+  differently-worded ticket about the same issue could still be missed.
+- Carrier-pattern detection has never fired against the real pack (it has
+  only one carrier-fault order) - the mechanism is proven via the
+  fixture-backed tier with an adjusted threshold, not a real-pack
+  positive case.
 
 See [`docs/evaluation_report.md`](evaluation_report.md) for the measured
 numbers behind these claims.

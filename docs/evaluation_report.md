@@ -8,8 +8,8 @@ here is estimated or projected.
 
 | Suite | Real pack | No pack (hosted CI) |
 |---|---|---|
-| Full `pytest` | 265 passed | 155 passed, 110 skipped, 0 failed |
-| `tests/fixture_backed/` only | 88 passed | 88 passed (never skips - see below) |
+| Full `pytest` | 306 passed | 192 passed, 114 skipped, 0 failed |
+| `tests/fixture_backed/` only | 125 passed | 125 passed (never skips - see below) |
 
 `tests/fixture_backed/` is the only suite `.github/workflows/ci.yml`
 guarantees runs and never skips - it uses a fabricated, version-controlled
@@ -138,6 +138,59 @@ one for action safety. Escalation eligibility is a deterministic rule
 target-state revalidation, and authorization are all covered with real
 pass/fail assertions against the fixture corpus.
 
+## Operations Radar (Phase 5)
+
+`scripts/run_operations_radar_eval.py --source-dir <real pack>` - full
+per-alert table in
+[`operations_radar_evaluation.md`](operations_radar_evaluation.md).
+
+**Real-pack detection results:** 6 alerts total - `sla_breach`: 2,
+`recurring_issue`: 1, `known_issue_pattern`: 2, `overdue_pickup`: 1.
+`sla_approaching` and `carrier_pattern` both found 0 (the real pack has no
+ticket in an unresolved SLA warning window, and only one carrier-fault
+order - below the pattern threshold of 2). Every alert reached
+`trust_state=CONFIDENT` with real evidence attached; none of the 6 was
+generated via any LLM judgment.
+
+**Golden-case regression (`tests/evaluation/test_golden_operations_radar_cases.py`,
+4 tests, real pack):** all 4 pass, matching a golden dataset written
+before this phase's detection code existed - exact record IDs
+(`TKT-501`/`TKT-505` for the two SLA breaches, `TKT-451`/`TKT-502` for the
+`KI-208` known-issue pattern, `ORD-2002` for the overdue pickup), exact
+affected accounts, and an exact `4.5`-hours-overdue computation.
+
+**Fixture-backed detection tests (`tests/fixture_backed/test_detection_*.py`,
+32 tests, never skip):** rule correctness at the threshold boundary
+(below/at/above), deterministic fingerprint/dedup behavior (order
+independence, rule-version sensitivity, no duplicate IDs across repeated
+runs), authorization (a scoped caller never sees another account's
+breach/recurring alert even as a partial count, the named "aggregate
+leakage" attack - requesting another account's P1 count - is denied,
+`restricted_support` is denied Operations Radar entirely with a
+structured error, no path from a detected alert into the action
+workflow), and the `detect_issues` tool contract (typed request/response,
+no raw SQL/query field exposed, `account_scope` can only narrow a
+caller's real access, never widen it).
+
+**Latency (`scripts/run_performance_benchmark.py`, see
+[`performance_report.md`](performance_report.md), 30 reps each):** a full
+unrestricted detection pass (`full_snapshot_scan`) - p50 6.90ms / p95
+7.38ms; a single-account-scoped pass (`scoped_account_query`) - p50
+3.08ms / p95 3.41ms. Both well under any interactive latency budget at
+this corpus size; scoping to one account is roughly 2x faster than a full
+scan, as expected from reading fewer rows, not from a different code
+path.
+
+**False-positive control:** one real false positive was found and fixed
+during development, not left as a known gap - `TKT-501` ("shipment
+creation is failing," an unrelated API error) initially matched
+`KI-208` (a bulk-upload issue) purely because both texts happened to
+share the generic words "shipment" and "creation." Fixed by excluding
+generic domain vocabulary from the match; both true positives
+(`TKT-502`, `TKT-504`) still match correctly, and the false positive is
+gone on the current real-pack run (0 of 6 alerts is a false positive by
+manual verification against the source records each cites).
+
 ## Release gates
 
 Per [`quality_gates.md`](quality_gates.md):
@@ -146,7 +199,7 @@ Per [`quality_gates.md`](quality_gates.md):
 |---|---|
 | 0 unauthorized access | Met - all security tests pass, including the action workflow's |
 | 0 unsafe actions | Met - every action security scenario fails safely with a structured error, never a silent success or a duplicated effect |
-| 0 deterministic regressions | Met - 265/265 pytest, including the full domain suite |
+| 0 deterministic regressions | Met - 306/306 pytest, including the full domain and Operations Radar suites |
 | 0 invalid required citations | Met - an invalid citation gets one bounded repair attempt, then a controlled `evidence_validation_failed` result if still invalid - never a silently-edited answer shown as valid |
 | RAG/agent quality thresholds | **Not set** - no real judge-scored baseline exists yet (MockProvider limitation) |
 

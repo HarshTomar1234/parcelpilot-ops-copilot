@@ -6,9 +6,11 @@ scoped operational data, computing outcomes deterministically, citing
 evidence, surfacing source conflicts, and requiring confirmation before any
 state change.
 
-**Status: Phase 4 complete (agent hardening + state-changing actions).** A
-CLI dev harness exists (`scripts/run_agent_cli.py`); no chat interface, no
-Operations Radar, no full UI yet - see [Roadmap](#roadmap).
+**Status: Phase 5 complete (Operations Radar: deterministic proactive issue
+detection).** A CLI dev harness exists (`scripts/run_agent_cli.py`); a
+separate evaluation script (`scripts/run_operations_radar_eval.py`)
+exercises Operations Radar; no chat interface, no full UI yet - see
+[Roadmap](#roadmap).
 
 ## Overview
 
@@ -56,12 +58,24 @@ never by "whichever result came back first."
   authorization-aware metadata filtering applied before ranking.
 - Typed, authorization-scoped structured-data lookups for accounts, orders,
   and tickets.
-- Three typed tool contracts (`search_documents`, `lookup_structured_data`,
-  `calculate_support_outcome`) - the only interface the agent uses; never
-  raw SQL, never an unvalidated dict. Document search applies a minimum
-  relevance threshold, calibrated against the real corpus, so a weakly-
-  matching off-topic query returns no evidence instead of a low-confidence
-  guess.
+- Four typed tool contracts (`search_documents`, `lookup_structured_data`,
+  `calculate_support_outcome`, `detect_issues`) - the only interface the
+  agent uses; never raw SQL, never an unvalidated dict. Document search
+  applies a minimum relevance threshold, calibrated against the real
+  corpus, so a weakly-matching off-topic query returns no evidence
+  instead of a low-confidence guess.
+- Operations Radar (`app/detection/`): deterministic, rule-based proactive
+  issue detection - SLA breach, SLA approaching, recurring high-severity
+  volume, known-issue pattern matching, carrier-fault pattern, and
+  overdue pickup. Every alert is produced by a named rule with an
+  explicit threshold and time window, never an LLM judgment; every alert
+  carries evidence (ticket/order IDs, document citations) and a
+  deterministic fingerprint so re-running detection never duplicates an
+  alert. Account-scoped: a caller only ever sees alerts for accounts
+  their `AuthContext` already permits, and a `restricted_support` caller
+  is denied the capability outright. An optional LLM pass can add a short
+  prose summary to an already-decided alert; it cannot alter the count,
+  threshold, severity, affected accounts, or evidence.
 - Request tracing (`request_id`/`trace_id`) via an OpenTelemetry-compatible
   interface, and structured JSON logging throughout.
 - A DeepEval-based RAG evaluation harness and MLflow experiment tracking,
@@ -102,6 +116,10 @@ app/agent/   run_agent(): entities -> intent -> plan -> tools -> evidence
         |
         v
 scripts/run_agent_cli.py   minimal dev harness (no frontend)
+
+app/detection/   run_operations_radar(): scoped structured data ->
+                 deterministic rules -> candidate alerts -> optional LLM
+                 summary -> AlertCandidate list (Operations Radar)
 ```
 
 Full rationale for every decision is in
@@ -201,18 +219,19 @@ ingestion, retrieval, and the domain layer.
 
 ```powershell
 .venv\Scripts\python.exe -m ruff check app scripts tests
-.venv\Scripts\python.exe -m pyright app scripts\ingest_sources.py scripts\run_retrieval_eval.py scripts\run_deepeval_baseline.py scripts\run_performance_benchmark.py scripts\run_agent_cli.py scripts\run_agent_trajectory_eval.py tests
+.venv\Scripts\python.exe -m pyright app scripts\ingest_sources.py scripts\run_retrieval_eval.py scripts\run_deepeval_baseline.py scripts\run_performance_benchmark.py scripts\run_agent_cli.py scripts\run_agent_trajectory_eval.py scripts\run_operations_radar_eval.py tests
 .venv\Scripts\python.exe -m pytest -q
 .venv\Scripts\python.exe scripts\run_retrieval_eval.py --source-dir "<pack>\source-pack"
 .venv\Scripts\python.exe scripts\run_deepeval_baseline.py --source-dir "<pack>\source-pack"
 .venv\Scripts\python.exe scripts\run_agent_trajectory_eval.py --source-dir "<pack>\source-pack"
 .venv\Scripts\python.exe scripts\run_performance_benchmark.py --source-dir "<pack>\source-pack"
+.venv\Scripts\python.exe scripts\run_operations_radar_eval.py --source-dir "<pack>\source-pack"
 .venv\Scripts\python.exe scripts\run_agent_cli.py --question "Is TKT-501 within its first-response SLA?"
 ```
 
 A `Makefile` wraps the same commands (`make lint`, `make typecheck`, `make
-test`, `make eval`, `make deepeval`, `make perf`, `make check`) for
-contributors who have `make`.
+test`, `make eval`, `make deepeval`, `make perf`, `make radar`, `make
+check`) for contributors who have `make`.
 
 ## Testing
 
@@ -231,12 +250,14 @@ without the pack (`.github/workflows/ci.yml`).
   calculations, policy applicability, tool contracts, and the full agent
   orchestrator against it.
 - `tests/regression/` - guards against regressing specific documented traps.
-- `tests/evaluation/` - the golden-case regression suite, the DeepEval RAG
-  harness test, and the agent trajectory harness test.
+- `tests/evaluation/` - the golden-case regression suite (including
+  Operations Radar's own golden cases), the DeepEval RAG harness test, and
+  the agent trajectory harness test.
 - `tests/fixture_backed/` - the public, always-runs CI tier: domain rules,
   authorization, retrieval (including the relevance threshold),
   SLA/severity, clarification, citation repair, budget enforcement, tool
-  timeout/retry, the full action workflow, and security regressions, all
+  timeout/retry, the full action workflow, Operations Radar detection
+  rules/deduplication/authorization, and security regressions, all
   against a fabricated dataset. Never needs the real pack, never skips.
 
 ## Deployment
@@ -245,16 +266,29 @@ Not built yet - no HTTP surface exists. See the Roadmap.
 
 ## Limitations
 
-- No chat interface, no full UI, no Operations Radar yet - a CLI dev
-  harness (`scripts/run_agent_cli.py`) is the only way to exercise the
-  agent today, and a separate direct call is the only way to exercise the
-  action workflow (not wired into the CLI harness this phase).
+- No chat interface, no full UI yet - a CLI dev harness
+  (`scripts/run_agent_cli.py`) is the only way to exercise the agent
+  today, a separate direct call is the only way to exercise the action
+  workflow, and Operations Radar is exercised via a tool call or
+  `scripts/run_operations_radar_eval.py`, not a dashboard.
 - Only one action type exists (`prepare_escalation`); a ticket-update
-  action was explicitly optional and wasn't built.
-- No bulk/aggregate queries across many records - the agent is
-  single-entity per request.
-- Authorization is account-scope filtering only; role-based field
-  allowlists are not implemented.
+  action was explicitly optional and wasn't built. Operations Radar can
+  only *recommend* preparing an escalation in an alert's text - it has no
+  code path to actually prepare, confirm, or execute one.
+- No bulk/aggregate queries in the agent's own question-answering
+  pipeline - it is still single-entity per request; Operations Radar's
+  detection rules are the aggregate-reasoning surface instead.
+- Authorization is account-scope filtering, plus one role check
+  (`restricted_support` is denied Operations Radar entirely); role-based
+  field-level allowlists are not implemented, since no field in this
+  schema is more sensitive than the account-scoped record it lives on.
+- Operations Radar runs on demand against a point-in-time snapshot, not
+  on a schedule, and has no persistent alert state (new/acknowledged/
+  resolved) across runs.
+- Known-issue pattern matching is a token-overlap heuristic, not a
+  learned or exact classifier - real, but imperfect (see
+  [`docs/architecture_note.md`](docs/architecture_note.md) for a false
+  positive found and fixed during development).
 - Business-hour SLA targets are parsed but not evaluated - the pack never
   defines a business calendar.
 - No real DeepEval quality score exists yet for RAG or agent task
@@ -276,8 +310,8 @@ Not built yet - no HTTP surface exists. See the Roadmap.
 covers retrieval strategy, source-authority precedence, the policy/domain
 split (who-wins vs. what-they-say), the LLM gateway design, pricing-as-data,
 and the tracing-now/monitoring-platform-later choice.
-[`docs/architecture_note.md`](docs/architecture_note.md) covers the Phase 3
-agent layer specifically. [`docs/product_note.md`](docs/product_note.md)
+[`docs/architecture_note.md`](docs/architecture_note.md) covers the agent
+layer, the action workflow, and Operations Radar. [`docs/product_note.md`](docs/product_note.md)
 describes the product from a user's perspective - what it can and can't do
 today.
 
@@ -297,6 +331,6 @@ rather than a clean success. Full account for this phase:
 Phase 1 data & retrieval (done) -> Phase 2 deterministic domain layer &
 LLMOps foundation (done) -> Phase 3 bounded agent orchestration (done) ->
 Phase 4 agent hardening, trust/citation/retrieval fixes, state-changing
-action workflow (done) -> Phase 5 role/field-level authorization ->
-Phase 6 Operations Radar -> Phase 7 full evaluation, cost, observability
--> Phase 8 UI -> Phase 9 deployment -> Phase 10 docs & demo.
+action workflow (done) -> Phase 5 Operations Radar: deterministic
+proactive issue detection (done) -> Phase 6 full evaluation, cost,
+observability -> Phase 7 UI -> Phase 8 deployment -> Phase 9 docs & demo.

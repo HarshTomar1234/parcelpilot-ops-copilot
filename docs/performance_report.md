@@ -4,15 +4,15 @@ Structured-data and domain-calculation latency, measured locally against the ful
 
 | Operation | p50 (ms) | p95 (ms) | n |
 |---|---|---|---|
-| get_account | 0.0626 | 0.0751 | 30 |
-| get_order | 0.0737 | 0.0938 | 30 |
-| get_ticket | 0.0735 | 0.1064 | 30 |
-| search_orders | 0.103 | 0.1329 | 30 |
-| search_tickets | 0.0961 | 0.1171 | 30 |
-| evaluate_cancellation | 0.1262 | 0.2065 | 180 |
-| evaluate_service_credit | 0.11 | 0.2007 | 180 |
-| calculate_sla | 0.3779 | 0.5431 | 210 |
-| classify_severity | 0.1369 | 0.1541 | 210 |
+| get_account | 0.0371 | 0.0459 | 30 |
+| get_order | 0.0445 | 0.0523 | 30 |
+| get_ticket | 0.0423 | 0.0474 | 30 |
+| search_orders | 0.09 | 0.1008 | 30 |
+| search_tickets | 0.0821 | 0.0889 | 30 |
+| evaluate_cancellation | 0.1126 | 0.1778 | 180 |
+| evaluate_service_credit | 0.0943 | 0.1801 | 180 |
+| calculate_sla | 0.3881 | 0.4523 | 210 |
+| classify_severity | 0.1289 | 0.1459 | 210 |
 
 ## Action workflow (Phase 4)
 
@@ -20,6 +20,15 @@ Structured-data and domain-calculation latency, measured locally against the ful
 
 | Operation | p50 (ms) | p95 (ms) | n |
 |---|---|---|---|
-| prepare_escalation | 104.9403 | 137.3369 | 30 |
-| confirm_action | 104.8864 | 116.5844 | 30 |
-| execute_action | 104.7532 | 788.0603 | 30 |
+| prepare_escalation | 105.0048 | 121.9502 | 30 |
+| confirm_action | 104.8714 | 127.3828 | 30 |
+| execute_action | 104.739 | 535.9921 | 30 |
+
+## Operations Radar (Phase 5)
+
+`full_snapshot_scan` runs every detection rule unrestricted (all accounts); `scoped_account_query` runs the same with the caller restricted to one account. Both measured against the real pack, not the fixture corpus.
+
+| Operation | p50 (ms) | p95 (ms) | n |
+|---|---|---|---|
+| full_snapshot_scan | 6.9032 | 7.3816 | 30 |
+| scoped_account_query | 3.0759 | 3.4057 | 30 |
