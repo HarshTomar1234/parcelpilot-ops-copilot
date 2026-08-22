@@ -1,5 +1,9 @@
-"""Fixtures for the always-runs public CI tier. No dependency on
-PARCELPILOT_SOURCE_DIR or the real pack anywhere in this file.
+"""Fixtures for the red-team suite (final release validation phase).
+Mirrors tests/fixture_backed/conftest.py exactly (same fabricated,
+version-controlled dataset, same DI-override technique for the `client`
+fixture) - red-team tests never need the real pack or a live server;
+they attack the same in-process ASGI app and fixture database that
+guarantee this tier always runs.
 """
 
 from __future__ import annotations
@@ -13,9 +17,6 @@ from typing import TYPE_CHECKING
 import pytest
 
 from app.authorization.context import INTERNAL_SYSTEM_CONTEXT, AuthContext, Role
-
-if TYPE_CHECKING:
-    from fastapi.testclient import TestClient
 from app.db.connection import init_db
 from app.time.clock import FixedSnapshotClock, SnapshotClock
 from tests.fixtures.seed_fixture_db import (
@@ -25,10 +26,13 @@ from tests.fixtures.seed_fixture_db import (
     build_fixture_db,
 )
 
+if TYPE_CHECKING:
+    from fastapi.testclient import TestClient
+
 
 @pytest.fixture(scope="session")
 def fixture_db_path(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    db_path = tmp_path_factory.mktemp("fixture_db") / "fixture.db"
+    db_path = tmp_path_factory.mktemp("red_team_fixture_db") / "fixture.db"
     conn = init_db(db_path)
     build_fixture_db(conn)
     conn.close()
@@ -54,18 +58,8 @@ def auth() -> AuthContext:
     return INTERNAL_SYSTEM_CONTEXT
 
 
-# ---------- API test client (Phase 6) ----------
-# The API layer's dependencies (app/api/deps.py) are all overridden to
-# point at the fixture DB/clock/registries instead of the real pack -
-# same DI-override technique FastAPI itself recommends for tests, and the
-# same "production-default, test-injectable" pattern already established
-# by app/actions/workflow.py and app/detection/service.py.
-
-
 @pytest.fixture()
 def client(fixture_db_path: Path) -> Iterator[TestClient]:
-    """Requires the `api` extra (fastapi, httpx) - imported lazily so the
-    rest of this always-runs tier still collects without it."""
     from fastapi.testclient import TestClient
 
     from app.api.demo_users import DemoUser
@@ -89,6 +83,10 @@ def client(fixture_db_path: Path) -> Iterator[TestClient]:
             id="support_agent", display_name="Fixture Support Agent (FX-001)",
             role=Role.SUPPORT_AGENT, account_scope=["FX-001"],
         ),
+        "support_agent_b": DemoUser(
+            id="support_agent_b", display_name="Fixture Support Agent B (FX-004)",
+            role=Role.SUPPORT_AGENT, account_scope=["FX-004"],
+        ),
         "restricted_support": DemoUser(
             id="restricted_support", display_name="Fixture Restricted Support (FX-002)",
             role=Role.RESTRICTED_SUPPORT, account_scope=["FX-002"],
@@ -97,9 +95,10 @@ def client(fixture_db_path: Path) -> Iterator[TestClient]:
 
     def _get_conn() -> Iterator[sqlite3.Connection]:
         # check_same_thread=False: matches app.db.connection.connect()'s
-        # fix for FastAPI's threadpool dispatch under concurrency (see
-        # tests/red_team/test_concurrency.py for the test that found this
-        # class of bug).
+        # fix - a TestClient dispatch under real thread concurrency (see
+        # tests/red_team/test_concurrency.py) hits the exact same
+        # cross-thread SQLite error this override would otherwise
+        # reintroduce.
         connection = sqlite3.connect(fixture_db_path, check_same_thread=False)
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys = ON")
