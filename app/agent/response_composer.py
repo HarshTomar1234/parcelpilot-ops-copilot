@@ -9,6 +9,7 @@ trust_gate.py, so there is no path for the model to change it.
 
 from __future__ import annotations
 
+from app.agent.budget_enforcement import approx_tokens
 from app.agent.citations import citation_key
 from app.agent.evidence_pack import EvidencePack
 from app.agent.prompts import load_prompt, prompt_version_string
@@ -66,16 +67,48 @@ def _render_user_prompt(pack: EvidencePack, trust_state: TrustState) -> str:
     return "\n".join(lines)
 
 
-def compose_response(
-    pack: EvidencePack,
-    trust_state: TrustState,
+def _render_repair_prompt(
+    pack: EvidencePack, trust_state: TrustState, previous_answer: str, invalid_markers: list[str]
+) -> str:
+    lines = [
+        "Your previous answer cited source markers that do not exist in the evidence "
+        "provided. Rewrite the answer using ONLY the exact markers listed below - do not "
+        "invent a marker or reuse an invalid one.",
+        "",
+        "Invalid markers you used: " + ", ".join(f"[{m}]" for m in invalid_markers),
+        "",
+        "Valid markers (cite using exactly these forms):",
+    ]
+    for ref in pack.citations:
+        note = f" {ref.note}" if ref.note else ""
+        lines.append(f"- [{citation_key(ref)}]{note}")
+    lines += [
+        "",
+        f"Previous answer:\n{previous_answer}",
+        "",
+        "Write a corrected, concise, grounded answer using only the valid markers above. "
+        f"State the trust level plainly if it is not CONFIDENT ({trust_state.value}).",
+    ]
+    return "\n".join(lines)
+
+
+def estimate_prompt_tokens(pack: EvidencePack, trust_state: TrustState) -> int:
+    """Called before compose_response() so the orchestrator can gate on
+    max_context_tokens/max_estimated_cost_usd before actually spending
+    either."""
+    system_prompt = load_prompt(_SYSTEM_PROMPT_NAME)
+    user_prompt = _render_user_prompt(pack, trust_state)
+    return approx_tokens(system_prompt) + approx_tokens(user_prompt)
+
+
+def _call_llm(
+    user_prompt: str,
     provider: LLMProvider,
     model: str,
     context: RequestContext,
     max_output_tokens: int,
 ) -> tuple[str, LLMResponse]:
     system_prompt = load_prompt(_SYSTEM_PROMPT_NAME)
-    user_prompt = _render_user_prompt(pack, trust_state)
     request = LLMRequest(
         messages=[
             LLMMessage(role="system", content=system_prompt),
@@ -87,3 +120,35 @@ def compose_response(
     )
     response = provider.complete(request, context)
     return response.content, response
+
+
+def compose_response(
+    pack: EvidencePack,
+    trust_state: TrustState,
+    provider: LLMProvider,
+    model: str,
+    context: RequestContext,
+    max_output_tokens: int,
+) -> tuple[str, LLMResponse]:
+    user_prompt = _render_user_prompt(pack, trust_state)
+    return _call_llm(user_prompt, provider, model, context, max_output_tokens)
+
+
+def repair_citations(
+    pack: EvidencePack,
+    trust_state: TrustState,
+    previous_answer: str,
+    invalid_markers: list[str],
+    provider: LLMProvider,
+    model: str,
+    context: RequestContext,
+    max_output_tokens: int,
+) -> tuple[str, LLMResponse]:
+    """One bounded repair attempt (Phase 4 pre-flight 1D): the orchestrator
+    calls this at most once, after the first composed answer fails
+    citation validation. If the repaired answer still fails validation,
+    the orchestrator returns a controlled evidence_validation_failed
+    result - it never silently strips the bad marker and presents the
+    answer as valid."""
+    repair_prompt = _render_repair_prompt(pack, trust_state, previous_answer, invalid_markers)
+    return _call_llm(repair_prompt, provider, model, context, max_output_tokens)
