@@ -230,3 +230,77 @@ blocks the file types defensively.
 
 **Consequence.** README must document how a reviewer supplies their own copy of
 the pack via `PARCELPILOT_SOURCE_DIR`.
+
+---
+
+## ADR-016 - Domain services own outcomes; policy owns applicability only
+
+**Context.** Phase 2 needed to encode which agreement clause overrides which
+default rule (docs/initial_rules.md R1.1: an agreement's authority is scoped
+to the clauses it actually addresses, never blanket).
+
+**Decision.** Split into two layers with a hard boundary. `app/policy/
+applicability.py` answers exactly one question - for a (topic, account),
+which source's clause governs - via a small explicit registry
+(`AGREEMENT_OVERRIDES`) where every entry cites the agreement section it
+restates. `app/domain/*.py` owns what the winning clause actually computes,
+via a `{source_id: rule_fn}` dispatch table per topic.
+
+**Rationale.** Conflating "who wins" with "what they say" is exactly how a
+system ends up treating agreement authority as blanket - the two questions
+have genuinely different failure modes (a stale/expired agreement term vs.
+a wrong fee formula) and belong in different, independently testable places.
+
+**Consequence.** Adding a new agreement clause is a two-part change (a
+registry entry in policy/, a rule function in the relevant domain module) by
+design - the friction is intentional, so it can never happen by only editing
+one side.
+
+---
+
+## ADR-017 - LLM gateway: one Protocol, provider swap never touches call sites
+
+**Decision.** `app/llm/base.py` defines `LLMProvider` as a `Protocol`
+(`complete(request, context) -> response`), not an ABC or a concrete client
+type. `MockProvider` (deterministic, no network) and `AnthropicProvider`
+(lazy-imports `anthropic`, only present via the optional `llm` extra) both
+satisfy it. No business or domain module imports an SDK.
+
+**Rationale.** Phase 2 has no agent yet and no API key was available while
+building it (docs/_internal/phase-reports/phase-02.md), so the gateway had
+to be fully exercisable without either. A `Protocol` costs nothing at import
+time (unlike an ABC requiring the concrete class hierarchy to exist), and
+`MockProvider` makes cost/token accounting and the DeepEval harness testable
+in CI with zero secrets and zero network calls.
+
+**Trade-off.** `AnthropicProvider` is construction-tested only, not
+call-tested against a live API - documented plainly in its docstring and in
+the test that exercises it, rather than claimed as verified.
+
+---
+
+## ADR-018 - Pricing is data, not code
+
+**Decision.** `app/llm/pricing.json` holds USD-per-million-token rates;
+`PricingTable` only computes `tokens / 1e6 * rate`. No model name or price
+appears in Python logic.
+
+**Consequence.** Updating a rate, or adding a model, never requires a code
+change or a new test beyond a JSON edit - and an unpriced model fails loudly
+(`KeyError`) rather than silently reporting zero cost.
+
+---
+
+## ADR-019 - Tracing interface now, no monitoring platform yet
+
+**Decision.** `app/observability/tracing.py` wraps `opentelemetry-api`
+(API package only, no SDK/exporter) behind `RequestContext` +
+`span()`. With no `TracerProvider` configured, every span is a documented
+OTel no-op - real, standard behavior, not a stub this codebase invented.
+
+**Rationale.** The ask was "make every future request traceable," not "stand
+up a monitoring platform" (explicitly out of scope this phase). Using the
+real OTel API now means a later phase turns tracing on by configuring one
+exporter, with zero call-site changes - versus writing a bespoke tracing
+interface now and swapping it for OTel later, which would touch every call
+site twice.
