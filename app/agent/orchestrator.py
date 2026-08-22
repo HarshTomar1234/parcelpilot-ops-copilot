@@ -56,6 +56,7 @@ class AgentRunResult(BaseModel):
     status: AgentStatus
     answer: str | None = None
     trust_state: TrustState | None = None
+    needs_human_review: bool = False  # operational flag, distinct from trust_state - see below
     citations: list[EvidenceRef] = []
     assumptions: list[str] = []
     conflicts: list[Conflict] = []
@@ -81,6 +82,7 @@ def _terminal(
     *,
     intent: Intent | None = None,
     trust_state: TrustState | None = None,
+    needs_human_review: bool = False,
     tool_trace: list[dict] | None = None,
     tool_calls: int = 0,
     llm_calls: int = 0,
@@ -95,6 +97,7 @@ def _terminal(
         reason=reason,
         intent=intent,
         trust_state=trust_state,
+        needs_human_review=needs_human_review,
         citations=citations or [],
         assumptions=assumptions or [],
         conflicts=conflicts or [],
@@ -298,7 +301,8 @@ def run_agent(
                 )
                 return _terminal(
                     context, "evidence_validation_failed", reason, state_trace, start,
-                    intent=intent, trust_state=trust_state, tool_trace=tool_trace,
+                    intent=intent, trust_state=trust_state,
+                    needs_human_review=pack.needs_human_review, tool_trace=tool_trace,
                     tool_calls=len(tool_results), llm_calls=llm_call_count,
                     total_cost_usd=total_llm_cost, citations=pack.citations,
                     assumptions=pack.assumptions, conflicts=pack.conflicts,
@@ -314,7 +318,8 @@ def run_agent(
                 state_trace.append(AgentState.FAILED.value)
                 return _terminal(
                     context, "failed", f"citation repair call failed: {exc}", state_trace, start,
-                    intent=intent, trust_state=trust_state, tool_trace=tool_trace,
+                    intent=intent, trust_state=trust_state,
+                    needs_human_review=pack.needs_human_review, tool_trace=tool_trace,
                     tool_calls=len(tool_results), llm_calls=llm_call_count,
                     total_cost_usd=total_llm_cost, citations=pack.citations,
                     assumptions=pack.assumptions, conflicts=pack.conflicts,
@@ -332,7 +337,8 @@ def run_agent(
                 )
                 return _terminal(
                     context, "evidence_validation_failed", reason, state_trace, start,
-                    intent=intent, trust_state=trust_state, tool_trace=tool_trace,
+                    intent=intent, trust_state=trust_state,
+                    needs_human_review=pack.needs_human_review, tool_trace=tool_trace,
                     tool_calls=len(tool_results), llm_calls=llm_call_count,
                     total_cost_usd=total_llm_cost, citations=pack.citations,
                     assumptions=pack.assumptions, conflicts=pack.conflicts,
@@ -361,6 +367,7 @@ def run_agent(
             status=final_status,
             answer=answer_text,
             trust_state=trust_state,
+            needs_human_review=pack.needs_human_review,
             citations=pack.citations,
             assumptions=pack.assumptions,
             conflicts=pack.conflicts,

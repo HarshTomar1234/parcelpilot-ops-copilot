@@ -54,6 +54,7 @@ def test_sla_p1_breach_is_a_confident_completed_answer_not_an_escalated_status(
     assert result.status == "completed"
     assert result.intent is Intent.SLA
     assert result.trust_state is TrustState.CONFIDENT  # confident it IS breached
+    assert result.needs_human_review is True  # operational flag, not epistemic doubt
     assert result.conflicts and result.conflicts[0].winner_source_id == "SRC-05"
 
 
@@ -62,6 +63,7 @@ def test_severity_question_does_not_escalate(conn, auth, clock, provider):
     assert result.status == "completed"
     assert result.intent is Intent.SEVERITY
     assert result.trust_state is TrustState.CONFIDENT
+    assert result.needs_human_review is False
 
 
 def test_unresolvable_question_is_insufficient_evidence(conn, auth, clock, provider):
