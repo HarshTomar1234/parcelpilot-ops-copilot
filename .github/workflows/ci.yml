@@ -17,11 +17,13 @@ name: CI
 #     is unset - the confidential assessment pack is never committed
 #     (AGENTS.md rule 18) and this repo has no secret wired to supply it on
 #     hosted runners. Verified locally: with no pack available, the full
-#     suite reports "84 passed, 101 skipped, 0 failed" - lint, type
+#     suite reports "105 passed, 110 skipped, 0 failed" - lint, type
 #     checking, and every pack-independent test (parsing/normalization
-#     logic, the LLM gateway, prompt registry, MLflow tracking, DeepEval
-#     harness, and the entire fixture_backed/ tier) still run and still
-#     catch real regressions.
+#     logic, the LLM gateway/provider-fallback routing, prompt registry,
+#     MLflow tracking, DeepEval harness, the agent state machine/tool
+#     registry/entity resolution, the fixture-backed security regressions,
+#     and the entire fixture_backed/ tier) still run and still catch real
+#     regressions.
 #
 # Real, protected evaluation against the actual pack lives in eval.yml.
 
@@ -53,7 +55,7 @@ jobs:
         run: .venv/bin/python -m ruff check app scripts tests
 
       - name: Pyright
-        run: .venv/bin/python -m pyright app scripts/ingest_sources.py scripts/run_retrieval_eval.py scripts/run_deepeval_baseline.py scripts/run_performance_benchmark.py tests
+        run: .venv/bin/python -m pyright app scripts/ingest_sources.py scripts/run_retrieval_eval.py scripts/run_deepeval_baseline.py scripts/run_performance_benchmark.py scripts/run_agent_cli.py scripts/run_agent_trajectory_eval.py tests
 
       - name: Public fixture-backed tests (must all pass, never skip)
         run: .venv/bin/python -m pytest tests/fixture_backed -v
