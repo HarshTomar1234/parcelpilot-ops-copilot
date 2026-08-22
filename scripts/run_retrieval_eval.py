@@ -206,6 +206,9 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--source-dir", required=True, type=Path)
     parser.add_argument("--db", default=Path("build/eval.db"), type=Path)
+    parser.add_argument(
+        "--mlflow", action="store_true", help="log this run as an MLflow experiment"
+    )
     args = parser.parse_args()
 
     result = run_eval(args.source_dir, args.db)
@@ -215,6 +218,26 @@ def main() -> int:
     summary = {k: v for k, v in result.items() if k != "rows"}
     print(json.dumps(summary, indent=2))
     print(f"\nwrote {REPORT_PATH}")
+
+    if args.mlflow:
+        from app.evaluation.mlflow_tracking import ExperimentRun, log_experiment_run
+
+        run = ExperimentRun.build(
+            experiment_name="parcelpilot-retrieval",
+            provider="n/a",  # deterministic BM25 retrieval - no LLM call in this eval
+            model="fts5-bm25",
+            retrieval_top_k=5,
+            retrieval_config={"filters": "none", "corpus_chunks": 18},
+            metrics={
+                "recall_at_3": result["recall_at_3"],
+                "recall_at_5": result["recall_at_5"],
+                "source_hit_rate": result["source_hit_rate"],
+            },
+            latency_ms={"p50": result["latency_p50_ms"], "p95": result["latency_p95_ms"]},
+            tags={"phase": "2", "eval_type": "retrieval"},
+        )
+        run_id = log_experiment_run(run)
+        print(f"logged MLflow run: {run_id}")
     return 0
 
 

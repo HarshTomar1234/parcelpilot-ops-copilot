@@ -304,3 +304,26 @@ real OTel API now means a later phase turns tracing on by configuring one
 exporter, with zero call-site changes - versus writing a bespoke tracing
 interface now and swapping it for OTel later, which would touch every call
 site twice.
+
+---
+
+## ADR-020 - MLflow tracking store: sqlite, not the plain filesystem backend
+
+**Context.** Phase 2 s16 asked for "a lightweight local tracking
+configuration," and the MLflow docs/most tutorials default to
+`file:./mlruns`.
+
+**Decision.** `app/evaluation/mlflow_tracking.py` defaults to
+`sqlite:///build/mlflow.db` instead.
+
+**Rationale.** Discovered by actually running it, not by reading docs first:
+MLflow 3.x raises on the plain filesystem backend by default -
+`the filesystem tracking backend ... is in maintenance mode ... Please
+migrate to a database backend`. A file-based SQLite database is still fully
+local, still gitignored, still zero-infrastructure - it is what "lightweight
+local tracking" means in the version actually installed (`mlflow==3.15.1`),
+not what it meant when file-backed tracking was still the default.
+`scripts/run_retrieval_eval.py --mlflow` and
+`scripts/run_deepeval_baseline.py --mlflow` both log real, queryable runs
+against it - verified by querying the run back, not just by a write that
+did not error.

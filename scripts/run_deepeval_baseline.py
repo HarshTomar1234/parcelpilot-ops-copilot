@@ -200,12 +200,36 @@ def main() -> int:
     parser.add_argument("--db", default=Path("build/deepeval.db"), type=Path)
     parser.add_argument("--provider", default="mock", choices=["mock", "anthropic"])
     parser.add_argument("--model", default="mock-model")
+    parser.add_argument(
+        "--mlflow", action="store_true", help="log this run as an MLflow experiment"
+    )
     args = parser.parse_args()
 
     result = run_baseline(args.source_dir, args.db, args.provider, args.model)
     REPORT_PATH.write_text(render_report(result), encoding="utf-8")
     print(json.dumps({k: v for k, v in result.items() if k != "rows"}, indent=2))
     print(f"\nwrote {REPORT_PATH}")
+
+    if args.mlflow:
+        from app.evaluation.mlflow_tracking import ExperimentRun, log_experiment_run
+
+        metrics = {
+            "cases_evaluated": float(result["cases_evaluated"]),
+            "cases_scored": float(result["cases_scored"]),
+        }
+        if result["mean_contextual_relevancy"] is not None:
+            metrics["mean_contextual_relevancy"] = result["mean_contextual_relevancy"]
+        if result["mean_faithfulness"] is not None:
+            metrics["mean_faithfulness"] = result["mean_faithfulness"]
+        run = ExperimentRun.build(
+            experiment_name="parcelpilot-deepeval",
+            provider=result["provider"],
+            model=result["model"],
+            metrics=metrics,
+            tags={"phase": "2", "eval_type": "deepeval", "judge": result["judge_model"]},
+        )
+        run_id = log_experiment_run(run)
+        print(f"logged MLflow run: {run_id}")
     return 0
 
 
