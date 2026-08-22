@@ -30,8 +30,11 @@ evaluation = [
     "mlflow>=2.16",
 ]
 
-[tool.setuptools]
-packages = ["app"]
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+[tool.setuptools.package-data]
+app = ["llm/pricing.json", "agent/prompts/*.md"]
 
 [tool.ruff]
 line-length = 100
