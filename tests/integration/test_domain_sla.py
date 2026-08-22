@@ -6,7 +6,9 @@ only the agreement is the correct answer.
 """
 
 from app.domain.outcomes import TrustState
-from app.domain.sla import calculate_sla
+from app.domain.sla import _lookup_sla_target, calculate_sla
+from app.models.enums import Severity
+from app.structured_data.repository import get_account
 
 
 def test_northstar_p1_breaches_under_the_agreement_not_the_default(conn, auth, clock):
@@ -47,3 +49,27 @@ def test_deprecated_policy_is_never_the_applicable_source(conn, auth, clock):
         result = calculate_sla(conn, ticket_id, auth, clock)
         assert result.result is not None
         assert result.result.applicable_source_id != "SRC-02"
+
+
+def test_account_specific_target_wins_over_plan_default_even_when_both_match(conn, auth):
+    """Real data never produces this ambiguity (a source_id is either wholly
+    plan-scoped or wholly account-scoped), so this constructs it directly:
+    insert a synthetic account-specific SRC-01/P1 row alongside the real
+    Enterprise plan row, and confirm the lookup does not depend on which one
+    SQLite happens to return first.
+    """
+    account = get_account(conn, "ACCT-004", auth)  # Axis Labs, plan=Enterprise
+    assert account.plan == "Enterprise"
+
+    conn.execute(
+        "INSERT INTO sla_targets "
+        "(source_id, scope_kind, plan, account_id, severity, target_text, "
+        " target_minutes, is_24x7, requires_business_calendar) "
+        "VALUES ('SRC-01', 'account', NULL, 'ACCT-004', 'P1', "
+        " '5 minutes, 24x7 (synthetic test row)', 5, 1, 0)"
+    )
+
+    row = _lookup_sla_target(conn, "SRC-01", account, Severity.P1)
+    assert row is not None
+    assert row["account_id"] == "ACCT-004"
+    assert row["target_minutes"] == 5
