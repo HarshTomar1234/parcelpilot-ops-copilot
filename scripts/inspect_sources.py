@@ -60,7 +60,11 @@ def load_workbook(source_dir: pathlib.Path):
     def sheet(name):
         rows = list(wb[name].iter_rows(values_only=True))
         header = rows[0]
-        return [dict(zip(header, r)) for r in rows[1:] if any(c is not None for c in r)]
+        return [
+            dict(zip(header, r, strict=True))
+            for r in rows[1:]
+            if any(c is not None for c in r)
+        ]
 
     return wb, sheet
 
@@ -78,7 +82,9 @@ def dump(source_dir: pathlib.Path, out: pathlib.Path) -> None:
             wb = openpyxl.load_workbook(path, data_only=True)
             parts = []
             for ws in wb.worksheets:
-                parts.append(f"\n===== SHEET {ws.title} rows={ws.max_row} cols={ws.max_column} =====")
+                parts.append(
+                    f"\n===== SHEET {ws.title} rows={ws.max_row} cols={ws.max_column} ====="
+                )
                 for row in ws.iter_rows(values_only=True):
                     if any(c is not None for c in row):
                         parts.append(" | ".join("" if c is None else str(c) for c in row))
@@ -163,8 +169,11 @@ def report(source_dir: pathlib.Path) -> dict:
         c = service_credit(o)
         if c:
             credits[o["order_id"]] = c
-            print(f"  {o['order_id']}  delay={c['delay_hours']}h via {c['reference']}  "
-                  f"default_sop=INR {c['default_sop_inr']}  lumenworks=INR {c['lumenworks_clause_inr']}")
+            print(
+                f"  {o['order_id']}  delay={c['delay_hours']}h via {c['reference']}  "
+                f"default_sop=INR {c['default_sop_inr']}  "
+                f"lumenworks=INR {c['lumenworks_clause_inr']}"
+            )
     if not credits:
         print("  (none eligible)")
 
@@ -184,7 +193,9 @@ def report(source_dir: pathlib.Path) -> dict:
             over = d["breached_by_minutes"]
             verdict = f"BREACHED by {over:g}m" if over > 0 else f"within target ({-over:g}m left)"
             print(f"  {t['ticket_id']}  sev={severity} {source:<28} due={d['due']}  {verdict}")
-        applied = "SRC-05 Northstar agreement" if t["account_id"] == "ACCT-001" else "SRC-01 v3 CURRENT"
+        applied = (
+            "SRC-05 Northstar agreement" if t["account_id"] == "ACCT-001" else "SRC-01 v3 CURRENT"
+        )
         if deadlines[applied]["breached_by_minutes"] > 0:
             breaches.append(t["ticket_id"])
 
@@ -194,7 +205,10 @@ def report(source_dir: pathlib.Path) -> dict:
         if actual and requested and requested > actual:
             print(f"  {o['order_id']}: cancellation requested {requested} AFTER pickup {actual}")
         if o["status"] == "BOOKED" and not actual and ts(o["pickup_window_end"]) < SNAPSHOT:
-            print(f"  {o['order_id']}: window ended {ts(o['pickup_window_end'])}, still BOOKED at snapshot")
+            print(
+                f"  {o['order_id']}: window ended {ts(o['pickup_window_end'])}, "
+                "still BOOKED at snapshot"
+            )
     print("  accounts with no contract_file:",
           [a for a, v in accounts.items() if not v["contract_file"]])
     print("  orphan fields (referenced by no document): premium_support, last_customer_message_at")
@@ -243,7 +257,8 @@ def self_check(source_dir: pathlib.Path) -> None:
     assert accounts["ACCT-001"]["premium_support"] is True
     assert not accounts["ACCT-004"]["contract_file"]
     assert all(o["customer_fault"] is False for o in orders.values())
-    assert {t["ticket_id"] for t in tickets.values() if t["historical_resolution"]} == {"TKT-450", "TKT-451"}
+    historical_ids = {t["ticket_id"] for t in tickets.values() if t["historical_resolution"]}
+    assert historical_ids == {"TKT-450", "TKT-451"}
 
     print("self-check: all Phase 0 facts hold")
 
