@@ -1,0 +1,232 @@
+# Architecture Decision Record
+
+Decisions taken at the end of Phase 0, informed by what the source pack actually
+contains. Status of every ADR here: **Accepted (Phase 0)** unless noted.
+
+---
+
+## ADR-001 â€” Build the internal ops copilot, not the customer-facing bot
+
+**Context.** The brief allows either, or both. The pack's centre of gravity is
+internal: cross-account tickets, historical resolutions flagged as unreliable,
+known-issue triage, SLA breach detection, and an explicitly requested "internal
+view for authorized support and operations users" (extension Problem 1).
+
+**Decision.** Ship the internal copilot for `operations_admin`, `support_agent`,
+`restricted_support`. Customer-facing mode is out of scope.
+
+**Consequences.** Authorization is *role + account scope* rather than a single
+customer identity, which is a harder and more interesting test. Operations Radar
+becomes a first-class surface rather than a bolt-on. If a customer-facing mode is
+added later it is a narrower special case of the same scoping (one account, no
+aggregates, no historical resolutions) â€” the model does not need to change.
+
+---
+
+## ADR-002 â€” Modular monolith, SQLite, no microservices
+
+**Decision.** FastAPI + Pydantic v2 + SQLite in one deployable. Documents,
+structured data, audit, and action state all live in one SQLite file built by an
+ingestion step.
+
+**Rationale.** The entire corpus is 6 one-page PDFs and 17 data rows. Anything
+distributed would be theatre. SQLite gives transactions, FTS5, and a single
+artefact to deploy.
+
+**Trade-off.** Single-writer concurrency limits throughput; acceptable at this
+scale and measured rather than assumed in Phase 7. Production evolution to
+Postgres is documented, not built.
+
+---
+
+## ADR-003 â€” Deterministic BM25 retrieval first; embeddings only if measured to help
+
+**Decision.** SQLite FTS5/BM25 over page- and section-aware chunks, with metadata
+filters (`authority_class`, `status`, `account_scope`) applied **before** ranking.
+No embeddings in Phase 1.
+
+**Rationale.** Six one-page documents with distinctive vocabulary
+("cancellation fee", "service credit", "first-response", "KI-208"). Lexical
+search is very likely sufficient, is deterministic, adds no model latency or
+cost, and is trivially inspectable â€” which matters more than recall here because
+every answer must be citable.
+
+**Revisit trigger.** If Phase 7 retrieval Recall@K on the golden set falls below
+target, add embeddings + rerank behind the same tool interface and re-measure.
+BM25 remains the fallback.
+
+---
+
+## ADR-004 â€” Source authority is metadata-driven, and the ranking is quoted, not invented
+
+**Decision.** Every chunk carries `authority_class`; precedence is
+`AGREEMENT` > `POLICY_CURRENT` > `PRODUCT_DOC` > `HISTORICAL`, with `DEPRECATED`
+excluded from answer construction. The ranking is taken verbatim from Support
+Policy v3 Â§1 (see `initial_rules.md` R1).
+
+**Sub-decision â€” scoped override.** An agreement overrides only clauses it
+addresses. The pack proves this is necessary in both directions: LumenWorks Â§2
+*declines* to override cancellation terms, and LumenWorks Â§3 *raises* the credit
+threshold so the agreement makes the customer **less** entitled than the default.
+A naive "agreement wins wholesale" rule produces wrong money on both.
+
+**Open question.** SOP v4 is not literally named in v3's precedence list. It is
+classed `POLICY_CURRENT` alongside v3. The two never address the same subject in
+this pack, so their relative order is never exercised â€” recorded so the inference
+is visible rather than silent.
+
+---
+
+## ADR-005 â€” Snapshot time is the only clock
+
+**Decision.** `2026-08-16 11:00 Asia/Kolkata`, parsed from the README sheet, is
+injected as the reference time for all dataset reasoning. The machine clock is
+never read on an answer path.
+
+**Consequence.** Results are reproducible and the golden set stays valid
+indefinitely. All workbook datetimes are naive and treated as Asia/Kolkata
+(recorded assumption â€” no timezone column exists).
+
+---
+
+## ADR-006 â€” An un-happened pickup accrues delay from the snapshot
+
+**Context.** `ORD-2002` has `pickup_actual_at = null`, a window that ended at
+06:30, and `carrier_fault = true`. The SOP defines the delay as time "past the
+end of the scheduled pickup window" but does not spell out the still-open case.
+
+**Decision.** When `pickup_actual_at` is null, measure delay as
+`snapshot âˆ’ pickup_window_end` and label the result as *accruing*.
+
+**Rationale.** The alternative â€” treating a pickup that never happened as
+zero delay â€” would deny a credit precisely when the failure is worst.
+
+**Status.** Assumption, surfaced in the response. Flagged here because it is an
+inference, not quoted policy.
+
+---
+
+## ADR-007 â€” Business hours are configuration, and business-hour SLAs are `CONDITIONAL`
+
+**Context.** This is the single largest gap in the pack. Most SLA targets are
+expressed in "business hours" / "business days", none of which the pack defines,
+and the snapshot falls on a **Sunday**. LumenWorks additionally has contractual
+"no weekend or after-hours support coverage" with no coverage window given.
+
+**Decision.**
+1. A business calendar (working days, working hours, timezone) is **configuration**
+   with a stated default, never a constant inside rule code.
+2. Any SLA result that depends on it returns trust state `CONDITIONAL` with the
+   assumption in the response `assumptions` array.
+3. 24x7 targets (Enterprise P1 under v3, Northstar P1 under SRC-05) are computed
+   exactly and may be `CONFIDENT`.
+
+**Consequence.** Of the five open tickets, two get exact answers and three get
+honest conditional ones. That split is a feature: the two exact answers happen to
+be the two genuine breaches.
+
+---
+
+## ADR-008 â€” SLA *compliance* is not measurable; only deadline vs snapshot is
+
+**Context.** The workbook has no `first_response_at` column.
+
+**Decision.** The system computes the deadline and reports whether the snapshot
+has passed it *with no recorded response*, and states that limitation in the
+answer. It never claims the team failed to respond.
+
+**Rationale.** Claiming a missed response from an absent column would be exactly
+the confidently-incorrect failure mode the brief warns about.
+
+---
+
+## ADR-009 â€” Severity is derived and labelled as an inference
+
+**Context.** No severity column exists; severity drives every SLA answer.
+
+**Decision.** Classify `description` against Support Policy v3 Â§2 with the
+matching definition text carried through as evidence. Severity is presented as a
+derived classification with its justification, not as a looked-up fact.
+
+**Trade-off.** Classification is the one place an LLM judgement enters a
+numeric path. Mitigation: the classifier returns one of exactly three values
+plus the matched clause; the arithmetic downstream is fully deterministic; and
+all five pack tickets map to near-verbatim definition language, so the golden
+set pins the expected labels.
+
+---
+
+## ADR-010 â€” Typed tools only; no model-generated SQL
+
+**Decision.** Six tools: `search_documents`, `lookup_structured_data`,
+`calculate_support_outcome`, `prepare_action`, `confirm_action`, `detect_issues`.
+Each takes a Pydantic-validated argument model and receives the server-validated
+auth context out-of-band from the conversation.
+
+**Rationale.** A narrow surface is auditable and testable. Unrestricted SQL would
+make authorization unenforceable below the model, violating an explicit brief
+requirement.
+
+---
+
+## ADR-011 â€” Authorization is filter-before-query, enforced in the data layer
+
+**Decision.** Account scope and field allowlists are applied inside the data
+access layer, so an out-of-scope record is never loaded, never enters model
+context, and never reaches a log. Denials are produced by the tool layer, not by
+the model choosing to refuse. Role and scope come from server-validated context
+and are not settable from conversation text.
+
+**Consequence.** Cross-account aggregates are a distinct permission, because a
+count over rows the caller cannot read is still a leak. Derived values are
+checked too: `restricted_support` cannot read `shipment_fee_inr`, so it also
+cannot receive a 10%-of-fee credit figure that reconstructs it.
+
+---
+
+## ADR-012 â€” Two-phase actions with hash, expiry, and idempotency
+
+**Decision.** `prepare_action` is non-mutating and returns `action_id`, target,
+proposed changes, rationale, evidence, risk, `payload_hash`, `expires_at`.
+`confirm_action` re-checks authorization, ownership, expiry, payload hash,
+evidence validity, current state, and prior execution before mutating.
+Execution is idempotent on `action_id`.
+
+**Rationale.** SOP v4 Â§3 already requires verification before a state-changing
+action when data conflicts, so this is a business requirement, not just hygiene.
+
+---
+
+## ADR-013 â€” Deterministic detection; the LLM only narrates
+
+**Decision.** Operations Radar rules are pure Python over the snapshot. Every
+alert carries `alert_id`, severity, reason, time window, threshold, count,
+representative records, affected accounts, linked evidence, recommended action.
+The LLM may summarise an alert; it may never produce a count or a causal claim.
+
+**Honesty constraint.** With 17 rows, blast radius must not be overstated: the
+`KI-208` recurrence is two tickets on **one** account and must say so.
+
+---
+
+## ADR-014 â€” Provider-abstracted LLM with bounded budgets
+
+**Decision.** One `LLMProvider` interface; provider, model, timeouts, max output
+tokens, context budget, temperature, retries, and pricing metadata all live in
+config. Token counts and estimated cost are recorded per request from day one.
+
+**Rationale.** Phase 7 needs to compare models on latency and cost without
+touching agent code, and cost cannot be reported honestly if it is not
+instrumented from the start.
+
+---
+
+## ADR-015 â€” Source files stay out of the public repository
+
+**Decision.** `D:\AI-Projects\parcelpilot-assessment` is never copied into the repo.
+`data/source_manifest.json` carries checksums and metadata so ingestion is
+verifiable and reproducible without redistributing customer material. `.gitignore`
+blocks the file types defensively.
+
+**Consequence.** README must document how a reviewer supplies their own copy of
+the pack via `PARCELPILOT_SOURCE_DIR`.

@@ -1,0 +1,41 @@
+# --- Source pack / customer material: NEVER commit (AGENTS.md rule 18) ---
+*.pdf
+*.xlsx
+*.docx
+data/source-pack/
+data/raw/
+build/
+
+# --- Secrets ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# --- Python ---
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+dist/
+build/
+*.egg-info/
+
+# --- Generated artefacts ---
+*.db
+*.sqlite
+*.sqlite3
+
+# --- Node / frontend ---
+node_modules/
+frontend/dist/
+
+# --- OS / editor ---
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

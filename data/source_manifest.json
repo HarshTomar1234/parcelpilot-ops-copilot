@@ -1,0 +1,203 @@
+{
+  "manifest_version": 1,
+  "generated_from": "D:\\AI-Projects\\parcelpilot-assessment",
+  "generated_on": "2026-08-22",
+  "note": "Checksums are SHA256 of the real source files. Source files themselves are NOT committed to this repository.",
+  "snapshot": {
+    "raw": "2026-08-16 11:00 Asia/Kolkata",
+    "iso": "2026-08-16T11:00:00+05:30",
+    "timezone": "Asia/Kolkata",
+    "weekday": "Sunday",
+    "origin": "ParcelPilot_Assessment_Data.xlsx / README sheet / row 'Dataset snapshot'",
+    "currency": "INR"
+  },
+  "authority_classes": {
+    "AGREEMENT": 1,
+    "POLICY_CURRENT": 2,
+    "PRODUCT_DOC": 3,
+    "HISTORICAL": 4,
+    "DEPRECATED": null,
+    "STRUCTURED": null
+  },
+  "sources": [
+    {
+      "source_id": "SRC-01",
+      "filename": "01_Support_Policy_v3_CURRENT.pdf",
+      "source_type": "support_policy",
+      "status": "CURRENT",
+      "version": "v3",
+      "effective_date": "2026-05-01",
+      "supersedes": "SRC-02",
+      "superseded_by": null,
+      "scope": {"kind": "global", "account_ids": null},
+      "authority_class": "POLICY_CURRENT",
+      "pages": 1,
+      "sections": [
+        {"id": "1", "title": "Scope and source precedence", "page": 1},
+        {"id": "2", "title": "Severity definitions", "page": 1},
+        {"id": "3", "title": "Default first-response targets", "page": 1},
+        {"id": "4", "title": "Escalation", "page": 1}
+      ],
+      "checksum": "sha256:db7097bb1e881327954282b9a4fbce8cbbc08d6868ab000478935bc00ee11fa2",
+      "bytes": 57898,
+      "parser_warnings": [
+        "Section 3 is a plan x severity table; PyMuPDF text extraction flattens it to one cell per line. Table structure must be reconstructed during ingestion or the plan/severity/target association is lost."
+      ],
+      "provenance": "Supplied candidate data pack, source-pack/"
+    },
+    {
+      "source_id": "SRC-02",
+      "filename": "02_Support_Policy_v2_DEPRECATED.pdf",
+      "source_type": "support_policy",
+      "status": "DEPRECATED",
+      "version": "v2",
+      "effective_date": "2025-01-01",
+      "supersedes": null,
+      "superseded_by": "SRC-01",
+      "scope": {"kind": "global", "account_ids": null},
+      "authority_class": "DEPRECATED",
+      "pages": 1,
+      "sections": [
+        {"id": "1", "title": "Severity and response targets", "page": 1}
+      ],
+      "checksum": "sha256:14c3b549474d8079d600935e915483f5085fcc5edb685c9a9b5cdcc4e687aa27",
+      "bytes": 51597,
+      "parser_warnings": [
+        "Same flattened-table issue as SRC-01.",
+        "TRAP SOURCE: must never be used to answer a current request. Retrievable only to explain that it is superseded."
+      ],
+      "provenance": "Supplied candidate data pack, source-pack/"
+    },
+    {
+      "source_id": "SRC-03",
+      "filename": "03_Cancellation_and_Service_Credit_SOP_v4.pdf",
+      "source_type": "sop",
+      "status": "CURRENT",
+      "version": "v4",
+      "effective_date": "2026-06-15",
+      "supersedes": null,
+      "superseded_by": null,
+      "scope": {"kind": "global", "account_ids": null},
+      "authority_class": "POLICY_CURRENT",
+      "pages": 1,
+      "sections": [
+        {"id": "1", "title": "Order cancellation", "page": 1},
+        {"id": "2", "title": "Failed-pickup service credits", "page": 1},
+        {"id": "3", "title": "Approval and uncertainty", "page": 1}
+      ],
+      "checksum": "sha256:79c20a835f868888236b3166ffb185e5a7921f48beb309ac79266489e121b006",
+      "bytes": 55186,
+      "parser_warnings": [
+        "Bulleted rules use a U+25CF + U+200B sequence; normalise bullets before chunking or rule text splits mid-clause."
+      ],
+      "provenance": "Supplied candidate data pack, source-pack/"
+    },
+    {
+      "source_id": "SRC-04",
+      "filename": "04_Product_Operations_Guide_and_Known_Issues.pdf",
+      "source_type": "product_doc",
+      "status": "CURRENT",
+      "version": null,
+      "effective_date": "2026-08-14",
+      "supersedes": null,
+      "superseded_by": null,
+      "scope": {"kind": "global", "account_ids": null},
+      "authority_class": "PRODUCT_DOC",
+      "pages": 1,
+      "sections": [
+        {"id": "1", "title": "Plan capabilities", "page": 1},
+        {"id": "2", "title": "Current known issues", "page": 1, "known_issues": ["KI-208", "KI-211"]},
+        {"id": "3", "title": "Resolved issue", "page": 1, "known_issues": ["KI-176"]}
+      ],
+      "checksum": "sha256:983ba3a75cefd62fa39c600e2ef56fb4860b19557d4e42e356c631b45a2249d4",
+      "bytes": 60752,
+      "parser_warnings": [
+        "KI-176 in section 3 is RESOLVED and self-describes as not applicable to new incidents. Chunk metadata must carry ki_status so a resolved issue is not retrieved as an active explanation."
+      ],
+      "provenance": "Supplied candidate data pack, source-pack/"
+    },
+    {
+      "source_id": "SRC-05",
+      "filename": "05_Northstar_Logistics_Enterprise_Agreement.pdf",
+      "source_type": "agreement",
+      "status": "ACTIVE",
+      "version": null,
+      "effective_date": "2026-01-01",
+      "expiry_date": "2026-12-31",
+      "supersedes": null,
+      "superseded_by": null,
+      "scope": {"kind": "account", "account_ids": ["ACCT-001"], "account_name": "Northstar Logistics"},
+      "authority_class": "AGREEMENT",
+      "pages": 1,
+      "sections": [
+        {"id": "1", "title": "Support terms", "page": 1, "overrides": "SRC-01#3"},
+        {"id": "2", "title": "Shipment cancellation", "page": 1, "overrides": "SRC-03#1"},
+        {"id": "3", "title": "Service credits", "page": 1, "overrides": "SRC-03#2 (aggregate cap only)"},
+        {"id": "4", "title": "Account contact", "page": 1}
+      ],
+      "checksum": "sha256:59e413076b34f5821bf7e3a9834d58ce0ed18883a40d07560d97a998406701cb",
+      "bytes": 53660,
+      "parser_warnings": [
+        "Section 3 caps the monthly aggregate but does NOT replace the SOP threshold or per-credit formula. Over-broad override extraction here produces wrong credit amounts."
+      ],
+      "provenance": "Supplied candidate data pack, source-pack/"
+    },
+    {
+      "source_id": "SRC-06",
+      "filename": "06_LumenWorks_Service_Agreement.pdf",
+      "source_type": "agreement",
+      "status": "ACTIVE",
+      "version": null,
+      "effective_date": "2026-03-01",
+      "expiry_date": "2027-02-28",
+      "supersedes": null,
+      "superseded_by": null,
+      "scope": {"kind": "account", "account_ids": ["ACCT-002"], "account_name": "LumenWorks"},
+      "authority_class": "AGREEMENT",
+      "pages": 1,
+      "sections": [
+        {"id": "1", "title": "Support terms", "page": 1, "overrides": "SRC-01#3"},
+        {"id": "2", "title": "Cancellation terms", "page": 1, "overrides": null},
+        {"id": "3", "title": "Failed-pickup credits", "page": 1, "overrides": "SRC-03#2 (threshold AND amount)"}
+      ],
+      "checksum": "sha256:294eae8ce53bd2fab97a9a3086c56be98fec142a512e9ea8acf24d88df70b2a8",
+      "bytes": 52943,
+      "parser_warnings": [
+        "Section 2 explicitly declines to override; an agreement clause can CONFIRM the default. Do not treat presence of an agreement as blanket override.",
+        "Section 3 raises the eligibility threshold from 2h to 4h, so it can make a customer LESS entitled than the default SOP."
+      ],
+      "provenance": "Supplied candidate data pack, source-pack/"
+    },
+    {
+      "source_id": "SRC-07",
+      "filename": "ParcelPilot_Assessment_Data.xlsx",
+      "source_type": "structured_data",
+      "status": "CURRENT",
+      "version": null,
+      "effective_date": "2026-08-16",
+      "supersedes": null,
+      "superseded_by": null,
+      "scope": {"kind": "global", "account_ids": null},
+      "authority_class": "STRUCTURED",
+      "sheets": [
+        {"name": "README", "rows": 5, "cols": 2},
+        {"name": "accounts", "rows": 4, "cols": 8},
+        {"name": "orders", "rows": 6, "cols": 13},
+        {"name": "tickets", "rows": 7, "cols": 10}
+      ],
+      "checksum": "sha256:4e69dbfd08b79fda6266bd7d8cace2cc3420565a46fad9d6a4de3db9a11e0a72",
+      "bytes": 23620,
+      "parser_warnings": [
+        "README 'Dataset snapshot' is stored as a STRING, not a datetime cell. Must be parsed as text including the IANA timezone name.",
+        "All other datetimes are naive with no timezone column; assumed Asia/Kolkata to match the snapshot.",
+        "tickets.historical_resolution is authority_class HISTORICAL and is documented by the README itself as possibly incorrect.",
+        "No severity, first_response_at, or order-to-ticket foreign key columns exist."
+      ],
+      "provenance": "Supplied candidate data pack, source-pack/"
+    }
+  ],
+  "excluded_from_repository": [
+    "All files under D:\\AI-Projects\\parcelpilot-assessment (customer/assessment material).",
+    "assessment-brief/CalQuity AI Engineer â€” Job Description & AI Agent Assessment.docx"
+  ]
+}
