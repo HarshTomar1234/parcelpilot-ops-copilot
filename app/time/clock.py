@@ -8,7 +8,7 @@ never call datetime.now() or time.time() directly.
 from __future__ import annotations
 
 import re
-from datetime import datetime
+from datetime import datetime, tzinfo
 from typing import Protocol
 from zoneinfo import ZoneInfo
 
@@ -37,6 +37,15 @@ class FixedSnapshotClock:
 
     def __repr__(self) -> str:
         return f"FixedSnapshotClock({self._snapshot.isoformat()})"
+
+
+def tz_of(clock: SnapshotClock) -> tzinfo:
+    """Every SnapshotClock is guaranteed timezone-aware (FixedSnapshotClock
+    enforces it at construction); this narrows the type for callers that
+    need to pass a plain tzinfo, e.g. the structured-data repository."""
+    result = clock.now().tzinfo
+    assert result is not None
+    return result
 
 
 def parse_snapshot(raw: str) -> datetime:

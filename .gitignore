@@ -30,6 +30,13 @@ build/
 *.sqlite
 *.sqlite3
 
+# --- Private engineering journal (not for the public repo) ---
+docs/_internal/
+
+# --- MLflow local tracking store ---
+mlruns/
+mlartifacts/
+
 # --- Node / frontend ---
 node_modules/
 frontend/dist/

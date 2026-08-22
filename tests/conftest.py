@@ -8,11 +8,14 @@ from __future__ import annotations
 import os
 import sqlite3
 from collections.abc import Iterator
+from datetime import datetime
 from pathlib import Path
 
 import pytest
 
+from app.authorization.context import INTERNAL_SYSTEM_CONTEXT, AuthContext
 from app.db.connection import connect
+from app.time.clock import FixedSnapshotClock, SnapshotClock
 from scripts.ingest_sources import ingest
 
 
@@ -45,3 +48,14 @@ def conn(ingested_db_path: Path) -> Iterator[sqlite3.Connection]:
     connection = connect(ingested_db_path)
     yield connection
     connection.close()
+
+
+@pytest.fixture()
+def clock(conn: sqlite3.Connection) -> SnapshotClock:
+    row = conn.execute("SELECT value FROM meta WHERE key = 'snapshot_time'").fetchone()
+    return FixedSnapshotClock(datetime.fromisoformat(row["value"]))
+
+
+@pytest.fixture()
+def auth() -> AuthContext:
+    return INTERNAL_SYSTEM_CONTEXT
