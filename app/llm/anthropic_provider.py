@@ -20,35 +20,19 @@ import random
 import time
 from collections.abc import Callable
 
+from app.llm.error_classification import is_retryable_provider_error
 from app.llm.pricing import PricingTable
 from app.llm.types import CostEstimate, LLMRequest, LLMResponse, TokenUsage
 from app.observability.tracing import RequestContext
 
-# Exception type names (checked via isinstance against the lazily-imported
-# `anthropic` module, so this module never imports anthropic at collection
-# time). Classification is by actual exception type, not by the SDK's
-# RetryableError marker - that marker exists in the SDK but is not actually
-# applied to any of these built-in exception classes, so it is not usable
-# for this purpose (verified against anthropic==1.0.0 by inspecting
+# Classification (which exception type names are retryable) now lives in
+# app/llm/error_classification.py, shared with the gateway's provider-level
+# fallback decision (Phase 4 pre-flight 1C) - this module used to keep its
+# own copy. Classification here is by actual exception type name, not the
+# SDK's RetryableError marker - that marker exists in the SDK but is not
+# actually applied to any of these built-in exception classes, so it is not
+# usable for this purpose (verified against anthropic==1.0.0 by inspecting
 # __mro__, not assumed from the name).
-_RETRYABLE_EXCEPTION_NAMES = frozenset(
-    {
-        "APIConnectionError",  # network failure
-        "APITimeoutError",  # timeout (subclass of APIConnectionError)
-        "RateLimitError",  # 429
-        "InternalServerError",  # 500
-        "OverloadedError",  # 529, provider temporarily overloaded
-        "ServiceUnavailableError",  # 503
-    }
-)
-# Everything else (AuthenticationError, PermissionDeniedError, BadRequestError,
-# NotFoundError, UnprocessableEntityError, ConflictError, RequestTooLargeError,
-# APIResponseValidationError, and any exception this list doesn't name) is
-# treated as non-retryable and raised immediately - conservative by design.
-
-
-def _is_retryable(exc: Exception) -> bool:
-    return type(exc).__name__ in _RETRYABLE_EXCEPTION_NAMES
 
 
 class AnthropicProvider:
@@ -109,7 +93,7 @@ class AnthropicProvider:
                 break
             except Exception as exc:
                 is_last_attempt = attempt == request.max_retries
-                if is_last_attempt or not _is_retryable(exc):
+                if is_last_attempt or not is_retryable_provider_error(exc):
                     raise
                 retries = attempt + 1
                 self._sleep(self._backoff_delay(attempt))

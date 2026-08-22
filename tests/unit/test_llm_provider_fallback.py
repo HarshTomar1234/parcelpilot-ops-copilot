@@ -1,24 +1,44 @@
 """Provider-fallback routing, tested with stub providers - no network call,
-no real credentials, no dependency on the source pack."""
+no real credentials, no dependency on the source pack.
+
+Failing providers raise exceptions named after real SDK exception classes
+(RateLimitError, AuthenticationError, ...) rather than a generic
+RuntimeError, because app/llm/gateway.py classifies by exception type
+name (app/llm/error_classification.py) - a RuntimeError would not match
+either the retryable or the recognized-non-retryable set, so using named
+stand-ins is what actually exercises the classification, not just the
+happy path around it.
+"""
 
 from __future__ import annotations
 
 import pytest
 
-from app.llm.gateway import AllProvidersFailedError, ParcelPilotLLMGateway
+from app.llm.gateway import (
+    AllProvidersFailedError,
+    NonRetryableProviderError,
+    ParcelPilotLLMGateway,
+)
 from app.llm.mock_provider import MockProvider
 from app.llm.types import CostEstimate, LLMMessage, LLMRequest, LLMResponse, TokenUsage
 from app.observability.tracing import RequestContext
 
 
-class _FailingProvider:
-    name = "failing-provider"
+class RateLimitError(Exception):
+    """Stand-in for anthropic.RateLimitError - retryable by name."""
 
-    def __init__(self, message: str = "simulated outage") -> None:
-        self._message = message
+
+class AuthenticationError(Exception):
+    """Stand-in for anthropic.AuthenticationError - not retryable by name."""
+
+
+class _FailingProvider:
+    def __init__(self, exc: Exception, name: str = "failing-provider") -> None:
+        self.name = name
+        self._exc = exc
 
     def complete(self, request: LLMRequest, context: RequestContext) -> LLMResponse:
-        raise RuntimeError(self._message)
+        raise self._exc
 
 
 def _request() -> LLMRequest:
@@ -37,9 +57,12 @@ def test_primary_success_records_a_single_attempt_and_no_fallback():
     assert gateway.last_run.provider_attempts[0].success is True
 
 
-def test_primary_failure_falls_over_to_the_next_provider():
+def test_retryable_failure_falls_over_to_the_next_provider():
     gateway = ParcelPilotLLMGateway(
-        [(_FailingProvider("rate limited"), "primary-model"), (MockProvider(), "mock-model")]
+        [
+            (_FailingProvider(RateLimitError("rate limited")), "primary-model"),
+            (MockProvider(), "mock-model"),
+        ]
     )
     response = gateway.complete(_request(), RequestContext.new())
 
@@ -50,13 +73,17 @@ def test_primary_failure_falls_over_to_the_next_provider():
     assert run.fallback_reason == "rate limited"
     assert len(run.provider_attempts) == 2
     assert run.provider_attempts[0].success is False
+    assert run.provider_attempts[0].retryable is True
     assert run.provider_attempts[0].provider == "failing-provider"
     assert run.provider_attempts[1].success is True
 
 
-def test_all_providers_failing_raises_with_every_attempt_recorded():
+def test_all_providers_failing_with_retryable_errors_raises_with_every_attempt_recorded():
     gateway = ParcelPilotLLMGateway(
-        [(_FailingProvider("outage one"), "m1"), (_FailingProvider("outage two"), "m2")]
+        [
+            (_FailingProvider(RateLimitError("outage one"), "p1"), "m1"),
+            (_FailingProvider(RateLimitError("outage two"), "p2"), "m2"),
+        ]
     )
     with pytest.raises(AllProvidersFailedError) as exc_info:
         gateway.complete(_request(), RequestContext.new())
@@ -64,8 +91,38 @@ def test_all_providers_failing_raises_with_every_attempt_recorded():
     attempts = exc_info.value.attempts
     assert len(attempts) == 2
     assert [a.error for a in attempts] == ["outage one", "outage two"]
+    assert all(a.retryable for a in attempts)
     assert gateway.last_run is not None
     assert gateway.last_run.total_cost_usd == 0.0
+
+
+def test_non_retryable_failure_stops_immediately_without_trying_the_rest():
+    fallback_provider_called = False
+
+    class _NeverCalledProvider:
+        name = "never-called"
+
+        def complete(self, request: LLMRequest, context: RequestContext) -> LLMResponse:
+            nonlocal fallback_provider_called
+            fallback_provider_called = True
+            return MockProvider().complete(request, context)
+
+    gateway = ParcelPilotLLMGateway(
+        [
+            (_FailingProvider(AuthenticationError("bad api key"), "primary"), "primary-model"),
+            (_NeverCalledProvider(), "fallback-model"),
+        ]
+    )
+    with pytest.raises(NonRetryableProviderError) as exc_info:
+        gateway.complete(_request(), RequestContext.new())
+
+    assert not fallback_provider_called
+    assert exc_info.value.attempt.error == "bad api key"
+    assert exc_info.value.attempt.retryable is False
+    run = gateway.last_run
+    assert run is not None
+    assert len(run.provider_attempts) == 1
+    assert run.fallback_used is False
 
 
 def test_empty_candidate_list_is_rejected_at_construction():
