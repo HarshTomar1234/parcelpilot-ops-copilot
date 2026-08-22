@@ -6,12 +6,15 @@ clean checkout must not fail collection, only skip what it can't run.
 from __future__ import annotations
 
 import os
-import sqlite3
-from collections.abc import Iterator
-from datetime import datetime
-from pathlib import Path
 
-import pytest
+os.environ.setdefault("DEEPEVAL_TELEMETRY_OPT_OUT", "YES")  # no network calls during tests
+
+import sqlite3  # noqa: E402
+from collections.abc import Iterator  # noqa: E402
+from datetime import datetime  # noqa: E402
+from pathlib import Path  # noqa: E402
+
+import pytest  # noqa: E402
 
 from app.authorization.context import INTERNAL_SYSTEM_CONTEXT, AuthContext
 from app.db.connection import connect
