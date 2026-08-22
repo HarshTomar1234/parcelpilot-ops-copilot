@@ -1,10 +1,13 @@
 """SQLite-backed persistence for the actions audit trail (Phase 4 s8). The
 `actions` table (app/db/schema.sql) IS the audit log - insert_action()
-writes the initial PENDING_CONFIRMATION row, save_action() overwrites it
-in place on every state transition, so there is exactly one row per
-action_id whose current fields always reflect its real current state, and
-whose history is fully reconstructable from prepared_at/confirmed_at/
-executed_at.
+writes the initial PENDING_CONFIRMATION row, save_action_if_status()
+overwrites it in place on every state transition, so there is exactly one
+row per action_id whose current fields always reflect its real current
+state, and whose history is fully reconstructable from
+prepared_at/confirmed_at/executed_at. Every state transition after insert
+is an atomic conditional UPDATE (WHERE status = expected), not a
+read-then-write, so concurrent callers can never both "win" the same
+transition (see save_action_if_status's docstring).
 """
 
 from __future__ import annotations
@@ -59,22 +62,37 @@ def insert_action(conn: sqlite3.Connection, record: ActionRecord) -> None:
     conn.commit()
 
 
-def save_action(conn: sqlite3.Connection, record: ActionRecord) -> None:
-    """Overwrites the row for record.action_id with its current field
-    values - used on every status transition (confirm, execute, reject,
-    expire, fail) so the table always reflects the real current state."""
-    conn.execute(
+def save_action_if_status(
+    conn: sqlite3.Connection, record: ActionRecord, expected_status: ActionStatus
+) -> bool:
+    """Atomic compare-and-swap: the WHERE clause re-checks status = expected
+    inside the same UPDATE statement, so the check and the write are one
+    SQL operation - not a separate read-then-write. Closes a real race
+    found via a red-team concurrency test (Phase "final red team"):
+    app/actions/workflow.py previously did a Python-level `if status ==
+    ...` check followed by an unconditional save_action(), so N
+    concurrent confirm_action (or execute_action) calls against the same
+    row could all read the pre-transition status before any of their
+    writes landed, and all report success - a live test measured 4/20
+    concurrent confirm_action calls on one PENDING_CONFIRMATION action
+    each returning success=True. Returns True iff this call's write is
+    the one that actually landed (rowcount == 1); False means another
+    concurrent caller won the race first - the caller must re-read the
+    record and report the real current state, never assume success."""
+    cursor = conn.execute(
         "UPDATE actions SET status = ?, confirmed_at = ?, executed_at = ?, failure_reason = ? "
-        "WHERE action_id = ?",
+        "WHERE action_id = ? AND status = ?",
         (
             record.status.value,
             record.confirmed_at.isoformat() if record.confirmed_at else None,
             record.executed_at.isoformat() if record.executed_at else None,
             record.failure_reason,
             record.action_id,
+            expected_status.value,
         ),
     )
     conn.commit()
+    return cursor.rowcount == 1
 
 
 def get_action(conn: sqlite3.Connection, action_id: str) -> ActionRecord | None:

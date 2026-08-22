@@ -24,7 +24,7 @@ import uuid
 from datetime import timedelta
 
 from app.actions.models import ActionOutcome, ActionRecord, ActionStatus, ActionType
-from app.actions.store import get_action, insert_action, save_action
+from app.actions.store import get_action, insert_action, save_action_if_status
 from app.authorization.context import AuthContext
 from app.domain.evidence import cite_structured
 from app.domain.sla import calculate_sla
@@ -160,7 +160,12 @@ def confirm_action(
         expired = record.model_copy(
             update={"status": ActionStatus.EXPIRED, "failure_reason": "confirmation window expired"}
         )
-        save_action(conn, expired)
+        if not save_action_if_status(conn, expired, ActionStatus.PENDING_CONFIRMATION):
+            # A concurrent caller already transitioned this row - report
+            # its real current state rather than the stale one this call
+            # read, never a stale "expired" result for a row that has
+            # actually moved on.
+            return _wrong_state_outcome(conn, action_id, "confirm")
         return ActionOutcome(
             success=False, record=expired, error_code="expired",
             error_message="action expired before confirmation",
@@ -195,16 +200,36 @@ def confirm_action(
         )
 
     confirmed = record.model_copy(update={"status": ActionStatus.CONFIRMED, "confirmed_at": now})
-    save_action(conn, confirmed)
+    if not save_action_if_status(conn, confirmed, ActionStatus.PENDING_CONFIRMATION):
+        # Lost a race against another concurrent confirm_action call on
+        # the same action_id - report the real state, never a false
+        # success (see save_action_if_status's docstring for the
+        # concurrency test that found this).
+        return _wrong_state_outcome(conn, action_id, "confirm")
     return ActionOutcome(success=True, record=confirmed)
+
+
+def _wrong_state_outcome(conn: sqlite3.Connection, action_id: str, verb: str) -> ActionOutcome:
+    current = get_action(conn, action_id)
+    assert current is not None  # the row existed moments ago in the same call
+    return ActionOutcome(
+        success=False, record=current, error_code="wrong_state",
+        error_message=(
+            f"action {action_id} is {current.status.value} - cannot {verb} "
+            "(a concurrent request already changed its state)"
+        ),
+    )
 
 
 def execute_action(conn: sqlite3.Connection, action_id: str, clock: SnapshotClock) -> ActionOutcome:
     """Only proceeds from CONFIRMED. Idempotent: calling this again on an
     already-EXECUTED action returns the same record without repeating the
     (mocked) effect - executing the same action twice never duplicates
-    it. The external effect itself is mocked: this never claims a real
-    external system call was made, only that the audit row was updated."""
+    it, including under real concurrency (the state transition itself is
+    an atomic conditional UPDATE, not a read-then-write - see
+    save_action_if_status). The external effect itself is mocked: this
+    never claims a real external system call was made, only that the
+    audit row was updated."""
     record = get_action(conn, action_id)
     if record is None:
         return ActionOutcome(
@@ -223,5 +248,15 @@ def execute_action(conn: sqlite3.Connection, action_id: str, clock: SnapshotCloc
     executed = record.model_copy(
         update={"status": ActionStatus.EXECUTED, "executed_at": clock.now()}
     )
-    save_action(conn, executed)
+    if not save_action_if_status(conn, executed, ActionStatus.CONFIRMED):
+        # Another concurrent execute_action call won the CAS race and
+        # already transitioned this row to EXECUTED (the only other
+        # state this UPDATE's WHERE clause could have missed against,
+        # since CONFIRMED->EXECUTED is the only transition this function
+        # ever performs) - re-read and return that real, already-executed
+        # record so this call is idempotent-safe rather than falsely
+        # reporting success for an effect it never actually triggered.
+        current = get_action(conn, action_id)
+        assert current is not None
+        return ActionOutcome(success=True, record=current)
     return ActionOutcome(success=True, record=executed)
