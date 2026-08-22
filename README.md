@@ -6,9 +6,9 @@ scoped operational data, computing outcomes deterministically, citing
 evidence, surfacing source conflicts, and requiring confirmation before any
 state change.
 
-**Status: Phase 3 complete (bounded agent orchestration).** A CLI dev
-harness exists (`scripts/run_agent_cli.py`); no chat interface, no action
-execution, no Operations Radar, no full UI yet - see [Roadmap](#roadmap).
+**Status: Phase 4 complete (agent hardening + state-changing actions).** A
+CLI dev harness exists (`scripts/run_agent_cli.py`); no chat interface, no
+Operations Radar, no full UI yet - see [Roadmap](#roadmap).
 
 ## Overview
 
@@ -26,11 +26,26 @@ never by "whichever result came back first."
 - A bounded agent (`app/agent/`) that resolves entities and intent
   deterministically, plans and executes only approved tools, builds a
   verified evidence pack, applies a hard trust gate, and composes a
-  grounded, cited answer - the LLM renders, it never decides a fact. See
+  grounded, cited answer - the LLM renders, it never decides a fact. A
+  question needing a specific order/ticket/account that names none, with
+  more than one possible account in scope, gets a clarification request
+  instead of a guessed answer. See
   [`docs/architecture_note.md`](docs/architecture_note.md).
-- A provider-resilient LLM gateway (`app/llm/gateway.py`) with ordered
-  fallback across providers, recording every attempt and whether a
-  fallback was used.
+- A two-phase, three-call state-changing action workflow (`app/actions/`):
+  `prepare_escalation` (non-mutating, deterministic eligibility check),
+  `confirm_action` (re-validates authorization, expiry, payload integrity,
+  and target state), `execute_action` (idempotent, mocked external
+  effect). Every call writes to a persistent audit trail. The agent can
+  only recommend an escalation in its answer text - it has no code path
+  to confirm or execute one.
+- An LLM answer whose citations fail validation gets one bounded repair
+  call; if still invalid, the request ends in a controlled
+  `evidence_validation_failed` result rather than a silently-edited
+  answer presented as valid.
+- A provider-resilient LLM gateway (`app/llm/gateway.py`) that classifies
+  a failure (timeout/network/429/5xx vs. auth/invalid-request/schema)
+  before deciding to retry a different provider or stop immediately,
+  recording every attempt and whether a fallback was used.
 - Deterministic cancellation, service-credit, SLA, and severity calculations,
   each returning a typed result with its trust state, evidence, assumptions,
   and any source conflict it resolved.
@@ -42,11 +57,11 @@ never by "whichever result came back first."
 - Typed, authorization-scoped structured-data lookups for accounts, orders,
   and tickets.
 - Three typed tool contracts (`search_documents`, `lookup_structured_data`,
-  `calculate_support_outcome`) - the only interface a future agent will use;
-  never raw SQL, never an unvalidated dict.
-- A provider-agnostic LLM gateway with full token/cost accounting, a
-  deterministic mock provider for tests and CI, and a real Anthropic-backed
-  provider behind the same interface.
+  `calculate_support_outcome`) - the only interface the agent uses; never
+  raw SQL, never an unvalidated dict. Document search applies a minimum
+  relevance threshold, calibrated against the real corpus, so a weakly-
+  matching off-topic query returns no evidence instead of a low-confidence
+  guess.
 - Request tracing (`request_id`/`trace_id`) via an OpenTelemetry-compatible
   interface, and structured JSON logging throughout.
 - A DeepEval-based RAG evaluation harness and MLflow experiment tracking,
@@ -133,9 +148,14 @@ Three layers, each answering a different question:
   [`docs/agent_trajectory_evaluation.md`](docs/agent_trajectory_evaluation.md).
   Consolidated view of every evaluation result:
   [`docs/evaluation_report.md`](docs/evaluation_report.md).
-- **Security regressions** (`tests/fixture_backed/test_security.py`) -
+- **Security regressions** (`tests/fixture_backed/test_security.py`,
+  `test_document_prompt_injection.py`, `test_action_security.py`) -
   cross-account access, tool-argument injection, SQL-injection-shaped
-  input, prompt injection - in the public, always-runs CI tier.
+  input, prompt injection in both question text and retrieved document
+  content, and the full action-workflow attack list (unauthorized/
+  cross-account targets, expired/replayed/duplicate confirmation, a
+  manipulated payload, a prompt trying to reach `confirm_action`/
+  `execute_action` directly) - all in the public, always-runs CI tier.
 
 Evaluation scripts accept `--mlflow` to log a reproducible experiment run
 (git SHA, config, metrics, latency, cost) to a local MLflow store - see
@@ -190,9 +210,6 @@ ingestion, retrieval, and the domain layer.
 .venv\Scripts\python.exe scripts\run_agent_cli.py --question "Is TKT-501 within its first-response SLA?"
 ```
 
-See [`docs/demo_script.md`](docs/demo_script.md) for a full walkthrough of
-`run_agent_cli.py`.
-
 A `Makefile` wraps the same commands (`make lint`, `make typecheck`, `make
 test`, `make eval`, `make deepeval`, `make perf`, `make check`) for
 contributors who have `make`.
@@ -217,9 +234,10 @@ without the pack (`.github/workflows/ci.yml`).
 - `tests/evaluation/` - the golden-case regression suite, the DeepEval RAG
   harness test, and the agent trajectory harness test.
 - `tests/fixture_backed/` - the public, always-runs CI tier: domain rules,
-  authorization, retrieval, SLA/severity, security regressions, and agent
-  ID-generality tests, all against a fabricated dataset. Never needs the
-  real pack, never skips.
+  authorization, retrieval (including the relevance threshold),
+  SLA/severity, clarification, citation repair, budget enforcement, tool
+  timeout/retry, the full action workflow, and security regressions, all
+  against a fabricated dataset. Never needs the real pack, never skips.
 
 ## Deployment
 
@@ -227,19 +245,16 @@ Not built yet - no HTTP surface exists. See the Roadmap.
 
 ## Limitations
 
-- No action execution, no chat interface, no full UI, no Operations Radar
-  yet - a CLI dev harness (`scripts/run_agent_cli.py`) is the only way to
-  exercise the agent today.
-- Retrieval cannot yet distinguish "weak match" from "no relevant evidence"
-  - an off-topic question currently still returns a low-confidence answer
-  instead of a clean refusal (see
-  [`docs/architecture_note.md`](docs/architecture_note.md)).
-- No clarification prompt for an ambiguous multi-account question that
-  names no specific order/account.
+- No chat interface, no full UI, no Operations Radar yet - a CLI dev
+  harness (`scripts/run_agent_cli.py`) is the only way to exercise the
+  agent today, and a separate direct call is the only way to exercise the
+  action workflow (not wired into the CLI harness this phase).
+- Only one action type exists (`prepare_escalation`); a ticket-update
+  action was explicitly optional and wasn't built.
 - No bulk/aggregate queries across many records - the agent is
   single-entity per request.
 - Authorization is account-scope filtering only; role-based field
-  allowlists and action permissions are not implemented.
+  allowlists are not implemented.
 - Business-hour SLA targets are parsed but not evaluated - the pack never
   defines a business calendar.
 - No real DeepEval quality score exists yet for RAG or agent task
@@ -249,12 +264,11 @@ Not built yet - no HTTP surface exists. See the Roadmap.
 - `AnthropicProvider` and `ParcelPilotLLMGateway`'s fallback routing are
   construction/unit-tested only; no live API call has been exercised (no
   key was available while building this).
-- No prompt-injection test covers retrieved document content, only
-  question text.
 - The SQLite database is single-writer and rebuilt from scratch each run;
   fine at this corpus size, not a concurrency design.
-- No Airflow/scheduler - nothing yet needs one
-  ([`docs/airflow_decision.md`](docs/airflow_decision.md)).
+- No Airflow/scheduler - ingestion is a single-shot, single-machine
+  script over a 7-file corpus; nothing here has the multi-stage,
+  scheduled, or cross-run-dependency shape that would justify one.
 
 ## Design notes
 
@@ -282,6 +296,7 @@ rather than a clean success. Full account for this phase:
 
 Phase 1 data & retrieval (done) -> Phase 2 deterministic domain layer &
 LLMOps foundation (done) -> Phase 3 bounded agent orchestration (done) ->
-Phase 4 role/field-level authorization -> Phase 5 action confirmation &
-audit -> Phase 6 Operations Radar -> Phase 7 full evaluation, cost,
-observability -> Phase 8 UI -> Phase 9 deployment -> Phase 10 docs & demo.
+Phase 4 agent hardening, trust/citation/retrieval fixes, state-changing
+action workflow (done) -> Phase 5 role/field-level authorization ->
+Phase 6 Operations Radar -> Phase 7 full evaluation, cost, observability
+-> Phase 8 UI -> Phase 9 deployment -> Phase 10 docs & demo.

@@ -1,7 +1,8 @@
-# Architecture Note: The Agent Layer (Phase 3)
+# Architecture Note: The Agent Layer
 
-This note covers `app/agent/` - the bounded state machine added in Phase 3
-on top of Phase 2's deterministic domain layer and tool contracts. For the
+This note covers `app/agent/` (the bounded question-answering state
+machine) and `app/actions/` (the state-changing action workflow) on top
+of the deterministic domain layer and tool contracts. For the
 domain/retrieval/policy architecture underneath it, see
 [`architecture_decision_record.md`](architecture_decision_record.md).
 
@@ -49,8 +50,10 @@ enforce_trust_gate()      the one place TrustState is decided; takes the
 compose_response()        one LLM call, renders over the verified pack
   |
   v
-validate_citations()      bounded correction (strip an invalid marker),
-                           never a silent pass
+validate_citations()      invalid -> one bounded repair call -> validate
+                           again -> still invalid means a controlled
+                           evidence_validation_failed result, never a
+                           silently-edited answer presented as valid
   |
   v
 AgentRunResult
@@ -123,28 +126,49 @@ drop-in replacement anywhere a provider is accepted - verified directly by
 passing a gateway to `run_agent()` with zero changes to the orchestrator
 or response composer.
 
-## What this phase deliberately does not do
+## Action workflow
 
-No state-changing actions (no `prepare_action`/`confirm_action` tool
-exists). No multi-turn conversation memory. No bulk/aggregate queries
-across many records - the planner is single-entity per request. No
-frontend beyond a CLI dev harness (`scripts/run_agent_cli.py`). No
-Operations Radar. These are Phase 4+ scope, not oversights.
+`app/actions/workflow.py` implements one state-changing action
+(`prepare_escalation`) as three separate calls - `prepare_action`,
+`confirm_action`, `execute_action` - never fewer. `prepare_escalation` is
+read-only against orders/tickets/accounts; its only write is inserting a
+`PENDING_CONFIRMATION` row into the `actions` table, which is the audit
+trail itself, not a separate log. Escalation eligibility is a
+deterministic rule (P1 severity or an SLA breach), never an LLM
+judgment. `confirm_action` re-validates authorization against the
+*current* caller (not the original preparer's cached auth), checks
+expiry, payload hash, and that the target's state hasn't changed since
+prepare. `execute_action` is idempotent - calling it again on an already-
+`EXECUTED` action returns the same result rather than repeating the
+(mocked) effect.
+
+The agent (`app/agent/orchestrator.py`) has no code path to
+`confirm_action` or `execute_action` at all - not gated by a check, but
+because the module never imports them. A recommendation to escalate
+reaches the user only as text in the composed answer (via the
+`needs_human_review` flag described above); actually preparing, confirming,
+and executing an action is a separate operation this phase, outside the
+question-answering loop.
+
+## What this deliberately does not do
+
+No multi-turn conversation memory. No bulk/aggregate queries across many
+records - the planner is single-entity per request. No frontend beyond a
+CLI dev harness (`scripts/run_agent_cli.py`). No Operations Radar. No
+Airflow/scheduler - nothing here has the multi-stage, scheduled work a
+DAG orchestrator is for. No second action type beyond `prepare_escalation`
+- a ticket-update action was explicitly optional and wasn't built. These
+are later-phase scope, not oversights.
 
 ## Known limitations
 
-- **Retrieval relevance.** BM25 over this small corpus returns `top_k`
-  results for nearly any query, including off-topic ones, so a
-  pure-retrieval answer path cannot currently reach `insufficient_evidence`
-  purely from weak relevance. Recommended fix: a minimum score threshold
-  in `search_documents` or the evidence-pack builder.
-- **Ambiguity detection.** A question that needs a specific order/account
-  but names none, with more than one account in scope, should ask for
-  clarification; today it falls through to a generic informational search
-  instead.
-- No prompt-injection test covers retrieved *document* content (only
-  question-text injection is tested) - a different attack surface, left
-  untested this phase.
+- No prompt-injection test targets a manipulated `payload_hash` submitted
+  through a channel other than a direct function call (e.g. a
+  hypothetical future HTTP API) - today's tests call `confirm_action`
+  directly, which is the only entry point that exists.
+- The action-eligibility rule (P1 or breached) is intentionally narrow;
+  it does not account for account-level agreement terms the way the
+  cancellation/service-credit calculators do.
 
 See [`docs/evaluation_report.md`](evaluation_report.md) for the measured
 numbers behind these claims.

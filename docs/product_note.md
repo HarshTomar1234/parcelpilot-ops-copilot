@@ -1,4 +1,4 @@
-# Product Note: ParcelPilot Ops Copilot (Phase 3)
+# Product Note: ParcelPilot Ops Copilot
 
 ## What it is
 
@@ -31,12 +31,26 @@ computed number tied to a real source, not a plausible-sounding guess.
   cannot get information about another account's orders or tickets through
   this system - not via a direct request, and not via a question crafted
   to try to talk it into ignoring that scope.
+- Refuse to guess about an off-topic question. A question with no
+  genuinely relevant evidence in the corpus returns "insufficient
+  evidence" rather than a low-confidence guess.
+- Ask for clarification when a question needs a specific order, ticket,
+  or account but doesn't name one and more than one is in scope, rather
+  than silently guessing which one was meant.
+- Prepare a ticket escalation for explicit human confirmation. Escalation
+  eligibility (a P1 ticket or an SLA breach) is a deterministic check, not
+  a judgment call - and nothing is actually escalated until a separate,
+  explicit confirmation step happens; the assistant itself only ever
+  recommends.
 
 ## What it explicitly does not do yet
 
-- **No actions.** It never cancels an order, issues a credit, or changes a
-  ticket - it only tells you what the calculation says. Confirming and
-  executing an action is a later phase.
+- **No automatic actions.** Escalation can be *prepared*, but confirming
+  and executing it is a separate, explicit step - the assistant never
+  does either on its own, and it never cancels an order or issues a
+  credit at all.
+- **No second action type.** A ticket-update action beyond escalation
+  isn't built.
 - **No Operations Radar** or any dashboard/monitoring view.
 - **No bulk questions.** "Which open tickets are past their SLA target"
   (a sweep across many records) isn't supported yet - ask about one order
@@ -44,22 +58,9 @@ computed number tied to a real source, not a plausible-sounding guess.
 - **No conversation memory.** Each question is answered independently.
 - **No polished interface.** Today it's a command-line tool
   (`scripts/run_agent_cli.py`) for internal verification and demos, not a
-  staff-facing product surface.
+  staff-facing product surface; the action workflow has no CLI yet either.
 
-## Two known rough edges
-
-- If you ask something entirely off-topic, it currently still tries to
-  find something relevant rather than clearly saying "I don't have
-  anything for that" - the underlying search will return its best (weak)
-  guess rather than refusing outright. A confidence-level check should
-  still keep you from trusting a weak answer, but it isn't a clean refusal
-  yet.
-- If you ask a question that needs a specific order or account but you
-  have more than one in scope and don't say which, it should ask you to
-  clarify - today it sometimes just searches policy documents in general
-  instead of asking.
-
-Both are recorded as known limitations with concrete next steps in
+Recorded with concrete detail in
 [`docs/evaluation_report.md`](evaluation_report.md).
 
 ## Example interaction
