@@ -6,8 +6,9 @@ scoped operational data, computing outcomes deterministically, citing
 evidence, surfacing source conflicts, and requiring confirmation before any
 state change.
 
-**Status: Phase 2 complete (deterministic domain layer, LLMOps foundation).**
-No agent loop, no chat interface, no UI yet - see [Roadmap](#roadmap).
+**Status: Phase 3 complete (bounded agent orchestration).** A CLI dev
+harness exists (`scripts/run_agent_cli.py`); no chat interface, no action
+execution, no Operations Radar, no full UI yet - see [Roadmap](#roadmap).
 
 ## Overview
 
@@ -22,6 +23,14 @@ never by "whichever result came back first."
 
 ## Capabilities
 
+- A bounded agent (`app/agent/`) that resolves entities and intent
+  deterministically, plans and executes only approved tools, builds a
+  verified evidence pack, applies a hard trust gate, and composes a
+  grounded, cited answer - the LLM renders, it never decides a fact. See
+  [`docs/architecture_note.md`](docs/architecture_note.md).
+- A provider-resilient LLM gateway (`app/llm/gateway.py`) with ordered
+  fallback across providers, recording every attempt and whether a
+  fallback was used.
 - Deterministic cancellation, service-credit, SLA, and severity calculations,
   each returning a typed result with its trust state, evidence, assumptions,
   and any source conflict it resolved.
@@ -67,9 +76,17 @@ app/agent/tools.py   typed tool contracts (Pydantic request/response,
                       traced via app/observability/tracing.RequestContext)
         |
         v
-app/llm/   LLMProvider gateway (MockProvider / AnthropicProvider)
-   -> app/llm/deepeval_bridge.py -> DeepEval RAG metrics
+app/llm/   LLMProvider gateway (MockProvider / AnthropicProvider),
+           ParcelPilotLLMGateway (ordered fallback across providers)
+   -> app/llm/deepeval_bridge.py -> DeepEval RAG + agent trajectory metrics
    -> app/evaluation/mlflow_tracking.py -> MLflow experiment log
+        |
+        v
+app/agent/   run_agent(): entities -> intent -> plan -> tools -> evidence
+             pack -> trust gate -> LLM response -> citation validation
+        |
+        v
+scripts/run_agent_cli.py   minimal dev harness (no frontend)
 ```
 
 Full rationale for every decision is in
@@ -100,18 +117,29 @@ Three layers, each answering a different question:
 - **Retrieval evaluation** (`scripts/run_retrieval_eval.py`) - Recall@K,
   source hit rate, and p50/p95 latency against the golden set. Report:
   [`docs/retrieval_evaluation.md`](docs/retrieval_evaluation.md).
-- **DeepEval** (`scripts/run_deepeval_baseline.py`) - RAG faithfulness and
-  contextual relevancy, LLM-judged. Report:
-  [`docs/deepeval_baseline.md`](docs/deepeval_baseline.md). **As of this
-  phase, this produces zero scored cases** - no `ANTHROPIC_API_KEY` was
-  available while building it, and the deterministic `MockProvider` cannot
-  satisfy DeepEval's structured-output requirement for a judge. The report
-  states plainly what *was* verified (the full retrieval -> generation ->
-  judge-call pipeline runs without error) versus what needs a real key.
+- **DeepEval RAG baseline** (`scripts/run_deepeval_baseline.py`) - RAG
+  faithfulness and contextual relevancy, LLM-judged. Report:
+  [`docs/deepeval_baseline.md`](docs/deepeval_baseline.md). **Produces zero
+  scored cases with `MockProvider`** - DeepEval's structured-output judge
+  requirement needs a real model. The report states plainly what *was*
+  verified (retrieval -> generation -> judge-call pipeline runs without
+  error) versus what needs a real key.
+- **Agent trajectory evaluation** (`scripts/run_agent_trajectory_eval.py`)
+  - runs the real agent against every eligible golden case and scores tool
+  correctness and terminal-status match (both exact-match, no judge
+  needed - genuine numbers even with `MockProvider`), plus attempts a
+  judge-based task-completion score (harness-blocked, same limitation as
+  above). Report:
+  [`docs/agent_trajectory_evaluation.md`](docs/agent_trajectory_evaluation.md).
+  Consolidated view of every evaluation result:
+  [`docs/evaluation_report.md`](docs/evaluation_report.md).
+- **Security regressions** (`tests/fixture_backed/test_security.py`) -
+  cross-account access, tool-argument injection, SQL-injection-shaped
+  input, prompt injection - in the public, always-runs CI tier.
 
-Both evaluation scripts accept `--mlflow` to log a reproducible experiment
-run (git SHA, config, metrics, latency, cost) to a local MLflow store -
-see [Configuration](#configuration).
+Evaluation scripts accept `--mlflow` to log a reproducible experiment run
+(git SHA, config, metrics, latency, cost) to a local MLflow store - see
+[Configuration](#configuration).
 
 Gates distinguishing what's enforced today from what's pending a real
 baseline: [`docs/quality_gates.md`](docs/quality_gates.md). Measured
@@ -153,12 +181,17 @@ ingestion, retrieval, and the domain layer.
 
 ```powershell
 .venv\Scripts\python.exe -m ruff check app scripts tests
-.venv\Scripts\python.exe -m pyright app scripts\ingest_sources.py scripts\run_retrieval_eval.py scripts\run_deepeval_baseline.py scripts\run_performance_benchmark.py tests
+.venv\Scripts\python.exe -m pyright app scripts\ingest_sources.py scripts\run_retrieval_eval.py scripts\run_deepeval_baseline.py scripts\run_performance_benchmark.py scripts\run_agent_cli.py scripts\run_agent_trajectory_eval.py tests
 .venv\Scripts\python.exe -m pytest -q
 .venv\Scripts\python.exe scripts\run_retrieval_eval.py --source-dir "<pack>\source-pack"
 .venv\Scripts\python.exe scripts\run_deepeval_baseline.py --source-dir "<pack>\source-pack"
+.venv\Scripts\python.exe scripts\run_agent_trajectory_eval.py --source-dir "<pack>\source-pack"
 .venv\Scripts\python.exe scripts\run_performance_benchmark.py --source-dir "<pack>\source-pack"
+.venv\Scripts\python.exe scripts\run_agent_cli.py --question "Is TKT-501 within its first-response SLA?"
 ```
+
+See [`docs/demo_script.md`](docs/demo_script.md) for a full walkthrough of
+`run_agent_cli.py`.
 
 A `Makefile` wraps the same commands (`make lint`, `make typecheck`, `make
 test`, `make eval`, `make deepeval`, `make perf`, `make check`) for
@@ -175,12 +208,18 @@ falling back to `../parcelpilot-assessment/source-pack`, and skip (not fail)
 if neither is found - a clean checkout, and hosted CI, both collect cleanly
 without the pack (`.github/workflows/ci.yml`).
 
-- `tests/unit/` - parsing, normalization, and gateway logic in isolation.
+- `tests/unit/` - parsing, normalization, and gateway/fallback logic in
+  isolation.
 - `tests/integration/` - full ingest into a temp database, domain
-  calculations, policy applicability, and tool contracts against it.
+  calculations, policy applicability, tool contracts, and the full agent
+  orchestrator against it.
 - `tests/regression/` - guards against regressing specific documented traps.
-- `tests/evaluation/` - the golden-case regression suite and the DeepEval
-  harness test.
+- `tests/evaluation/` - the golden-case regression suite, the DeepEval RAG
+  harness test, and the agent trajectory harness test.
+- `tests/fixture_backed/` - the public, always-runs CI tier: domain rules,
+  authorization, retrieval, SLA/severity, security regressions, and agent
+  ID-generality tests, all against a fabricated dataset. Never needs the
+  real pack, never skips.
 
 ## Deployment
 
@@ -188,15 +227,30 @@ Not built yet - no HTTP surface exists. See the Roadmap.
 
 ## Limitations
 
-- No agent, no chat interface, no UI yet.
+- No action execution, no chat interface, no full UI, no Operations Radar
+  yet - a CLI dev harness (`scripts/run_agent_cli.py`) is the only way to
+  exercise the agent today.
+- Retrieval cannot yet distinguish "weak match" from "no relevant evidence"
+  - an off-topic question currently still returns a low-confidence answer
+  instead of a clean refusal (see
+  [`docs/architecture_note.md`](docs/architecture_note.md)).
+- No clarification prompt for an ambiguous multi-account question that
+  names no specific order/account.
+- No bulk/aggregate queries across many records - the agent is
+  single-entity per request.
 - Authorization is account-scope filtering only; role-based field
   allowlists and action permissions are not implemented.
 - Business-hour SLA targets are parsed but not evaluated - the pack never
   defines a business calendar.
-- No real DeepEval quality score exists yet (see Evaluation above) - the
-  harness is verified to run, not verified to produce good numbers.
-- `AnthropicProvider` is construction-tested only; no live API call has
-  been exercised against it (no key was available while building this).
+- No real DeepEval quality score exists yet for RAG or agent task
+  completion (see Evaluation above) - both harnesses are verified to run,
+  not verified to produce good numbers; agent tool-correctness and
+  status-match scores are real, since they don't need a judge.
+- `AnthropicProvider` and `ParcelPilotLLMGateway`'s fallback routing are
+  construction/unit-tested only; no live API call has been exercised (no
+  key was available while building this).
+- No prompt-injection test covers retrieved document content, only
+  question text.
 - The SQLite database is single-writer and rebuilt from scratch each run;
   fine at this corpus size, not a concurrency design.
 - No Airflow/scheduler - nothing yet needs one
@@ -208,6 +262,10 @@ Not built yet - no HTTP surface exists. See the Roadmap.
 covers retrieval strategy, source-authority precedence, the policy/domain
 split (who-wins vs. what-they-say), the LLM gateway design, pricing-as-data,
 and the tracing-now/monitoring-platform-later choice.
+[`docs/architecture_note.md`](docs/architecture_note.md) covers the Phase 3
+agent layer specifically. [`docs/product_note.md`](docs/product_note.md)
+describes the product from a user's perspective - what it can and can't do
+today.
 
 ## AI-assisted development
 
@@ -217,12 +275,13 @@ and running every verification command referenced in this README and in
 gitignored). Every claim of "done" here corresponds to a command that was
 actually run, including the ones that surfaced a real limitation (MockProvider
 cannot judge DeepEval metrics; MLflow's filesystem backend is deprecated)
-rather than a clean success.
+rather than a clean success. Full account for this phase:
+[`docs/AI_USAGE.md`](docs/AI_USAGE.md).
 
 ## Roadmap
 
 Phase 1 data & retrieval (done) -> Phase 2 deterministic domain layer &
-LLMOps foundation (done) -> Phase 3 bounded agent orchestration -> Phase 4
-role/field-level authorization -> Phase 5 action confirmation & audit ->
-Phase 6 Operations Radar -> Phase 7 full evaluation, cost, observability ->
-Phase 8 UI -> Phase 9 deployment -> Phase 10 docs & demo.
+LLMOps foundation (done) -> Phase 3 bounded agent orchestration (done) ->
+Phase 4 role/field-level authorization -> Phase 5 action confirmation &
+audit -> Phase 6 Operations Radar -> Phase 7 full evaluation, cost,
+observability -> Phase 8 UI -> Phase 9 deployment -> Phase 10 docs & demo.
