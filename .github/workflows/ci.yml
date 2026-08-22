@@ -1,0 +1,51 @@
+name: CI
+
+# Fast, deterministic checks: lint, type check, and the full pytest suite.
+# No LLM calls happen here - MockProvider only - so this is safe to run on
+# every push/PR with no secrets and no external network access.
+#
+# IMPORTANT: the assessment source pack (data/source_manifest.json's real
+# PDFs + workbook) is never committed (AGENTS.md rule 18) and this repo has
+# no secret wired to supply it, so on GitHub-hosted runners every test that
+# depends on the `source_dir`/`conn`/`clock`/`auth` fixtures will report
+# SKIPPED, not PASSED - tests/conftest.py's _find_source_dir() returns None
+# and pytest.skip()s, by design (see docs/data_dictionary.md's Phase 1
+# design and README's Testing section). Lint, type checking, and the
+# pack-independent unit tests (parsing/normalization logic, the LLM
+# gateway, prompt registry, MLflow tracking, DeepEval harness) still run
+# and still catch real regressions.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Create venv and install dependencies
+        run: |
+          uv venv .venv
+          uv pip install --python .venv/bin/python -e ".[dev,llm,evaluation]"
+
+      - name: Ruff
+        run: .venv/bin/python -m ruff check app scripts tests
+
+      - name: Pyright
+        run: .venv/bin/python -m pyright app scripts/ingest_sources.py scripts/run_retrieval_eval.py scripts/run_deepeval_baseline.py tests
+
+      - name: Pytest
+        env:
+          DEEPEVAL_TELEMETRY_OPT_OUT: "YES"
+        run: .venv/bin/python -m pytest -v
