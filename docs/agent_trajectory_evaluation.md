@@ -11,8 +11,8 @@
 - Provider: `mock` / model `mock-model`
 - Judge: `mock/mock-model`
 - Cases evaluated: **19**
-- Mean tool correctness: **0.89**
-- Status match rate: **0.82** (17 status-checkable cases; the rest expect an action_pending/action_completed/rejected status, out of scope for Phase 3)
+- Mean tool correctness: **0.84**
+- Status match rate: **0.88** (17 status-checkable cases; the rest expect an action_pending/action_completed/rejected status, out of scope for Phase 3)
 - Task completion: scored for 0 of 19 cases (harness-blocked for the rest: `Evaluation LLM outputted an invalid JSON. Please use a better evaluation model.`)
 
 ## Per-case results
@@ -20,7 +20,7 @@
 | Case | Tools expected | Tools called | Tool correctness | Status expected | Status actual | Match |
 |---|---|---|---|---|---|---|
 | GC-001 | lookup_structured_data, search_documents, calculate_support_outcome | lookup_structured_data, calculate_support_outcome, search_documents | 1.00 | completed | completed | yes |
-| GC-002 | search_documents | search_documents | 1.00 | needs_clarification | completed | NO |
+| GC-002 | search_documents |  | 0.00 | needs_clarification | needs_clarification | yes |
 | GC-003 | lookup_structured_data, search_documents | lookup_structured_data, calculate_support_outcome, search_documents | 1.00 | completed | completed | yes |
 | GC-004 | lookup_structured_data, search_documents, calculate_support_outcome | lookup_structured_data, calculate_support_outcome, search_documents | 1.00 | completed | completed | yes |
 | GC-005 | lookup_structured_data, search_documents, calculate_support_outcome | lookup_structured_data, search_documents | 0.67 | completed | completed | yes |

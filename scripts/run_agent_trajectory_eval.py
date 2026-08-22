@@ -73,6 +73,7 @@ def _build_provider(name: str, model: str) -> LLMProvider:
 
 
 def run_trajectory_eval(source_dir: Path, db_path: Path, provider_name: str, model: str) -> dict:
+    from deepeval.errors import MissingTestCaseParamsError
     from deepeval.metrics import TaskCompletionMetric, ToolCorrectnessMetric
 
     ingest(source_dir, db_path)
@@ -114,7 +115,7 @@ def run_trajectory_eval(source_dir: Path, db_path: Path, provider_name: str, mod
         try:
             task_metric.measure(test_case)
             row["task_completion"] = task_metric.score
-        except ValueError as exc:
+        except (ValueError, MissingTestCaseParamsError) as exc:
             task_completion_error = str(exc)
             row["task_completion"] = None
         rows.append(row)
