@@ -41,37 +41,23 @@ agent, detection, and action layers work internally.
 
 ## Architecture
 
-```
-source pack (PDFs + xlsx, external, never committed)
-        |
-        v
-scripts/ingest_sources.py  ->  build/parcelpilot.db (SQLite)
-        |
-        +--> app/documents/retrieval.py          search_documents()
-        +--> app/structured_data/repository.py   get_*/search_* (AuthContext-scoped)
-        v
-app/policy/applicability.py   which source's clause governs (topic, account)?
-        v
-app/domain/{cancellation,service_credit,sla,severity}.py
-   deterministic calculation -> DecisionResult[T]
-        v
-app/agent/tools.py   4 typed tool contracts (search_documents,
-                      lookup_structured_data, calculate_support_outcome,
-                      detect_issues)
-        v
-app/llm/   LLMProvider gateway (MockProvider / AnthropicProvider),
-           ordered fallback across providers
-        v
-app/agent/run_agent()            app/detection/run_operations_radar()      app/actions/{prepare,confirm,execute}_*
-        |                                    |                                          |
-        +------------------------------------+------------------------------------------+
-                                              v
-                                     app/api/  (FastAPI)
-                                     /api/chat, /api/radar/run,
-                                     /api/actions/{prepare,confirm,execute}
-                                     /health, /ready, static staff UI
-                                              v
-                                   browser (app/api/static/)
+```mermaid
+flowchart TD
+    A["Source pack (PDFs + xlsx)<br/>external, never committed"] --> B["scripts/ingest_sources.py<br/>&rarr; build/parcelpilot.db (SQLite)"]
+    B --> C["app/documents/retrieval.py<br/>search_documents()"]
+    B --> D["app/structured_data/repository.py<br/>get_*/search_* (AuthContext-scoped)"]
+    C --> E["app/policy/applicability.py<br/>which source's clause governs? (topic, account)"]
+    D --> E
+    E --> F["app/domain/{cancellation, service_credit, sla, severity}.py<br/>deterministic calculation &rarr; DecisionResult[T]"]
+    F --> G["app/agent/tools.py<br/>4 typed tool contracts"]
+    G --> H["app/llm/<br/>LLMProvider gateway (Mock / Anthropic)<br/>ordered fallback across providers"]
+    H --> I["app/agent/run_agent()"]
+    H --> J["app/detection/run_operations_radar()"]
+    H --> K["app/actions/{prepare, confirm, execute}_*"]
+    I --> L
+    J --> L
+    K --> L["app/api/ (FastAPI)<br/>/api/chat, /api/radar/run, /api/actions/*<br/>/health, /ready, static staff UI"]
+    L --> M["Browser (app/api/static/)"]
 ```
 
 Full rationale for every decision:
