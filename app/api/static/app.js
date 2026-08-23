@@ -41,6 +41,19 @@ function badge(text, cls) {
   return span;
 }
 
+function escapeHtml(str) {
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+// Live models write **bold** in prose; render it instead of showing the
+// literal asterisks (found by testing a real answer against the live UI).
+function renderAnswerHtml(str) {
+  return escapeHtml(str).replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+}
+
 // ---------- top bar / identity ----------
 
 async function loadIdentities() {
@@ -151,7 +164,7 @@ function renderChatResult(data) {
 
   if (r.answer) {
     const p = document.createElement("p");
-    p.textContent = r.answer;
+    p.innerHTML = renderAnswerHtml(r.answer);
     card.appendChild(p);
   }
   if (r.reason) {
