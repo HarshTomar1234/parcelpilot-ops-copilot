@@ -10,11 +10,17 @@ def test_loads_current_support_agent_prompt():
 
 
 def test_prompt_version_string_matches_registry():
-    assert prompt_version_string("support_agent_system") == "support_agent_system_v1"
+    assert prompt_version_string("support_agent_system") == "support_agent_system_v2"
 
 
 def test_can_load_an_explicit_version():
-    assert load_prompt("support_agent_system", version="v1") == load_prompt("support_agent_system")
+    assert load_prompt("support_agent_system", version="v2") == load_prompt("support_agent_system")
+
+
+def test_v1_still_loadable_as_a_shipped_version():
+    v1 = load_prompt("support_agent_system", version="v1")
+    assert "trust_state" in v1
+    assert v1 != load_prompt("support_agent_system", version="v2")
 
 
 def test_unknown_prompt_name_raises():

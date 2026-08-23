@@ -13,7 +13,7 @@ _PROMPTS_DIR = Path(__file__).parent
 # Logical name -> current version. Bump the value (and add the new file)
 # when a prompt changes; never edit a shipped version's file in place.
 CURRENT_VERSIONS: dict[str, str] = {
-    "support_agent_system": "v1",
+    "support_agent_system": "v2",
     "operations_radar_summary_system": "v1",
 }
 
