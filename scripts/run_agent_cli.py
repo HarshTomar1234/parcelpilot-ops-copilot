@@ -5,9 +5,7 @@ answer, citations, conflicts, assumptions, and the tool/state trace.
 
 Uses MockProvider by default. Pass --live to use a real Anthropic call
 (requires ANTHROPIC_API_KEY and the `llm` extra); this is opt-in, never
-automatic, per the "do not fabricate live results" rule - see
-docs/_internal/phase-reports/phase-03.md for why no live smoke test has
-been run in this environment.
+automatic, per the "do not fabricate live results" rule.
 
 Usage:
     python scripts/run_agent_cli.py --question "Is TKT-501 within SLA?"
@@ -21,6 +19,14 @@ import argparse
 import sys
 from datetime import datetime
 from pathlib import Path
+
+# A real --live answer can contain any Unicode character the model
+# writes (e.g. an INR amount as "₹250") - Windows terminals often
+# default to a restrictive codepage (cp1252) that can't encode it,
+# crashing a plain print() with UnicodeEncodeError. Found by actually
+# running --live for the first time with a real key, not assumed.
+if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[attr-defined]
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 

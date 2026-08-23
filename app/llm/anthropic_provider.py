@@ -78,9 +78,16 @@ class AnthropicProvider:
         kwargs: dict[str, object] = {
             "model": request.model,
             "max_tokens": request.max_output_tokens,
-            "temperature": request.temperature,
             "messages": messages,
             "timeout": request.timeout_seconds,
+            # temperature is still a real, documented Messages API field,
+            # but the installed SDK's typed create() signature dropped it
+            # (verified directly against anthropic==1.0.0 - a real, live
+            # smoke test failed with "unexpected keyword argument
+            # 'temperature'" before this fix) - extra_body is the SDK's
+            # own supported mechanism for a field its typed params don't
+            # expose, not an undocumented workaround.
+            "extra_body": {"temperature": request.temperature},
         }
         if system is not None:
             kwargs["system"] = system
