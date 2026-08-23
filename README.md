@@ -256,12 +256,14 @@ independently verified.
   [`docs/architecture_note.md`](docs/architecture_note.md)).
 - Business-hour SLA targets are parsed but not evaluated - the pack never
   defines a business calendar.
-- No real DeepEval quality score exists for RAG or agent task completion
-  without a live model key; tool-correctness/status-match scores are real
-  since they need no judge.
-- `AnthropicProvider` and its gateway fallback are construction/unit-
-  tested only; no live API call has been exercised (no key available
-  while building this).
+- Real DeepEval quality scores now exist for RAG and agent task
+  completion (`claude-haiku-4-5-20251001` as judge - see
+  [`docs/evaluation_report.md`](docs/evaluation_report.md)); no
+  pass/fail threshold is wired into CI as a release gate yet.
+- `AnthropicProvider` has been exercised against a real live API call
+  (CLI, `/api/chat`, and both DeepEval evaluations); its gateway
+  fallback to a second provider remains construction/unit-tested only -
+  only one provider/key is available.
 - SQLite is single-writer with one connection per request, no pool -
   every action-workflow state transition is a single atomic conditional
   `UPDATE`, so concurrent requests are *correct* (verified under real
