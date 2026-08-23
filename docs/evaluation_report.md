@@ -357,6 +357,37 @@ thing is or isn't proven.
 | Semantic sufficiency (GC-016-class questions) | **KNOWN LIMITATION** | a lexical gate (F4) cannot fully resolve "retrieved text is topically strong but doesn't answer the specific fact asked" - open, documented, not claimed solved |
 | Action-existence enumeration via non-GET paths | **KNOWN LIMITATION** | `POST /api/actions/execute` still returns a distinct 403 for a non-owner (by design - see red_team_report.md F5); only `GET /api/actions/{id}` was normalized to 404 |
 
+## Final acceptance metrics
+
+One table, deliberately not averaged into a fake overall score - see
+`docs/_internal/demo_acceptance_matrix.md` for the full per-question
+acceptance run this table summarizes.
+
+| Category | Metric | Value |
+|---|---|---|
+| Tests | Real-pack pytest | 453 passed, 0 failed |
+| Tests | Fixture-backed pytest | 158 passed (never skips) |
+| Tests | Red-team | 114 passed, 0 failed |
+| Retrieval | Recall@3 | 1.0 |
+| Retrieval | Recall@5 | 1.0 |
+| Retrieval | Source hit rate | 0.96 |
+| Agent | Tool correctness | 0.84 (judge-free, exact match) |
+| Agent | Status match | 0.94 (16/17 checkable, judge-free) |
+| Agent | Task completion | NOT AVAILABLE (no judge model) |
+| Radar | Alert count (real snapshot) | 6 (2 sla_breach, 1 recurring_issue, 2 known_issue_pattern, 1 overdue_pickup) |
+| Radar | Golden match rate | 6/6 = 100% |
+| Security | Unauthorized access (acceptance run) | 0 - Section 11/12 of the acceptance matrix, every cross-account/injection attempt denied or safely scoped |
+| Security | Unsafe actions | 0 - full prepare/confirm/execute matrix, Section 14 |
+| Security | Prompt-injection regressions | 0 - 114/114 red-team passing, plus live acceptance re-check |
+| Security | Action race | 0 duplicate transitions - 20 concurrent confirms, exactly 1 succeeds |
+| Performance | Chat p50/p95 (concurrency 1) | 81.8ms / 81.8ms (live container, this phase) |
+| Performance | Chat p50/p95 (concurrency 10) | 257.5ms / 270.9ms |
+| Performance | Radar p50/p95 (concurrency 1) | 266.1ms / 266.1ms |
+| Performance | Radar p50/p95 (concurrency 10) | 1265.6ms / 1286.5ms |
+| Performance | Action p50/p95 (single-call, real pack) | prepare ~125ms, confirm ~81ms, execute ~70ms (`performance_report.md`) |
+| Cost | Real live-model cost | NOT AVAILABLE - no `ANTHROPIC_API_KEY` in this environment |
+| Cost | Measured cost (MockProvider) | $0.00 |
+
 ## Release gates
 
 Per [`quality_gates.md`](quality_gates.md):
