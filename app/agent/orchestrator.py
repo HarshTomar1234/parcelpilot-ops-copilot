@@ -32,6 +32,7 @@ from app.agent.clarification import needs_account_clarification
 from app.agent.context import AgentRequestContext
 from app.agent.entities import resolve_entities
 from app.agent.evidence_pack import build_evidence_pack
+from app.agent.evidence_sufficiency import is_document_evidence_sufficient
 from app.agent.intent import Intent, resolve_intent
 from app.agent.planner import build_plan
 from app.agent.registry import execute_tool
@@ -227,6 +228,26 @@ def run_agent(
             return _terminal(
                 context, "insufficient_evidence", reason, state_trace, start, intent=intent,
                 tool_trace=tool_trace, tool_calls=len(tool_results),
+                planned_tools=[s.tool for s in plan.steps],
+            )
+
+        # A resolved entity with a real domain calculation result is
+        # already sufficient grounding on its own - the sufficiency gate
+        # only matters for the document-search-only path, where a
+        # per-chunk relevance floor alone can't tell a genuinely
+        # off-topic question from one that happens to share vocabulary
+        # with an unrelated chunk (final release hardening, finding F4).
+        if not pack.domain_results and not is_document_evidence_sufficient(
+            question, pack.document_evidence
+        ):
+            state_trace.append(AgentState.INSUFFICIENT_EVIDENCE.value)
+            reason = (
+                "retrieved document evidence does not sufficiently support this question"
+            )
+            return _terminal(
+                context, "insufficient_evidence", reason, state_trace, start, intent=intent,
+                tool_trace=tool_trace, tool_calls=len(tool_results),
+                planned_tools=[s.tool for s in plan.steps],
             )
 
         trust_state = enforce_trust_gate(pack.domain_trust_states, bool(pack.document_evidence))

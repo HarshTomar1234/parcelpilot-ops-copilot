@@ -64,25 +64,30 @@ def test_cross_account_request_via_chat_never_widens_the_scoped_callers_view(cli
 
 
 def test_irrelevant_query_never_gets_a_fabricated_confident_answer(client):
-    """The relevance floor (MIN_RELEVANCE_SCORE) is calibrated against
-    the real pack's score distribution, not this fixture corpus's - a
-    weak match can still pass it here (a documented, corpus-dependent
-    limitation, not a security hole), but even then it must never be
-    presented as CONFIDENT."""
+    """Finding F4 (fixed): MIN_RELEVANCE_SCORE alone let a coincidental
+    per-chunk BM25 match through for a genuinely off-topic question - the
+    evidence-sufficiency gate (app/agent/evidence_sufficiency.py) now
+    requires real token overlap or a strong, corroborated score before a
+    document-search-only answer is allowed to proceed, so this returns
+    insufficient_evidence deterministically rather than merely "not
+    CONFIDENT"."""
     resp = client.post("/api/chat", json={"question": "What is the weather today in Mumbai?"})
     assert resp.status_code == 200
     result = resp.json()["result"]
-    assert result["status"] in {"completed", "insufficient_evidence"}
-    assert result["trust_state"] != "CONFIDENT"
+    assert result["status"] == "insufficient_evidence"
+    assert result["trust_state"] is None
 
 
 def test_very_broad_query_still_respects_the_relevance_floor(client):
     resp = client.post("/api/chat", json={"question": "Tell me everything about anything."})
     assert resp.status_code == 200
-    # Never a fabricated CONFIDENT answer from a query with no real target.
-    assert resp.json()["result"]["trust_state"] != "CONFIDENT" or (
-        resp.json()["result"]["citations"]
-    )
+    result = resp.json()["result"]
+    # Never a fabricated CONFIDENT answer from a query with no real
+    # target - the evidence-sufficiency gate (F4) makes this
+    # deterministic: no meaningful token overlap and no strong,
+    # corroborated score means insufficient_evidence, not a guess.
+    assert result["status"] == "insufficient_evidence"
+    assert result["trust_state"] is None
 
 
 def test_injection_like_query_text_is_treated_as_a_literal_search_string(client):
