@@ -85,6 +85,43 @@ Full rationale for every decision:
   The agent and Operations Radar can only *recommend* escalation in text
   - neither has a code path to actually prepare, confirm, or execute one.
 
+## Design choices
+
+Decisions that had a real alternative, and why the alternative lost:
+
+- **Deterministic domain layer + LLM-as-explainer, not an LLM-decides-
+  everything agent.** The alternative - let the model reason freely over
+  retrieved text and state the fee/deadline itself - was rejected because
+  a wrong fee or a wrong SLA verdict is a real business/compliance risk.
+  Every number traces to a Python function and a citation, never to a
+  model's confidence; the LLM's only job is turning an already-decided
+  `DecisionResult` into readable, cited prose.
+- **A fixed dataset-snapshot clock ([ADR-005](docs/architecture_decision_record.md)),
+  not the real wall clock.** The system reasons about one frozen
+  assessment snapshot, so every "how long ago" calculation stays
+  reproducible regardless of when it's run. The real tradeoff: the
+  action workflow's own audit timestamps freeze too, so its 15-minute
+  expiry can't be observed from natural elapsed time in a live session -
+  accepted rather than adding a second clock implementation this late.
+- **Real DeepEval/MLflow libraries, not a custom evaluation harness.**
+  Building a bespoke scoring framework was an explicit non-goal. A small
+  adapter (`app/llm/deepeval_bridge.py`) lets DeepEval's own metric
+  classes use Claude as judge instead of its default OpenAI judge - a
+  documented, standard DeepEval extension pattern, not a reimplementation.
+- **SQLite, not Postgres or a managed database.** The scope is one
+  ~180KB dataset snapshot with a tightly bounded write pattern (one
+  action-workflow row per action). A managed database would be
+  infrastructure with no requirement behind it. The tradeoff: single
+  writer, no connection pool - correct under real concurrency (atomic
+  compare-and-swap, verified at 20-way concurrent load), not a
+  throughput design past this corpus size.
+- **A bounded agent - one LLM call, a fixed tool registry, hard
+  budgets - not an open-ended agent loop.** Predictable cost and
+  latency, and no risk of an unbounded tool-calling loop. The tradeoff:
+  genuinely multi-hop reasoning beyond the four fixed tools isn't
+  possible; Operations Radar exists as the separate aggregate-reasoning
+  surface instead of stretching the agent to cover it.
+
 ## Evaluation
 
 - **pytest** (`tests/`) - deterministic correctness, including golden-case
@@ -261,3 +298,33 @@ independently verified.
 - No conversation memory - each question is answered independently, and
   the staff UI's demo-identity picker is a hosted-assessment stand-in for
   a real identity provider, not a design for one.
+
+## Roadmap - closing the limitations above
+
+- **Ticket-update action** - extend `app/actions/` with a second
+  `ActionType`, reusing the prepare/confirm/execute pattern already
+  hardened against race conditions and replay.
+- **Bulk/aggregate questions in chat** - a new intent plus a
+  deterministic aggregation tool, kept separate from Operations Radar's
+  existing detection rules rather than overloading them.
+- **Scheduled Operations Radar with persisted alert state** - a
+  cron-triggered run plus a "seen alert" table; deduplication logic
+  already exists via deterministic fingerprinting, so this is mostly
+  wiring, not new detection logic.
+- **A learned known-issue classifier** - replace the token-overlap
+  heuristic with embedding similarity or a small trained classifier, now
+  that a live model is available to help generate labeled examples.
+- **AI-quality release gate** - wire the real DeepEval baseline numbers
+  that now exist (faithfulness, contextual relevancy, task completion)
+  into an actual CI pass/fail threshold, instead of just reporting them.
+- **A second LLM provider for real fallback testing** - add a second API
+  key and re-run the existing red-team concurrency/failure suite against
+  a genuine provider outage, not just the classification unit tests.
+- **Public deployment** - Railway, once local live-model testing is
+  complete.
+- **Field-level redaction** - not needed for this schema today (no field
+  is more sensitive than the account-scoped record it lives on), but
+  `AuthContext` is already the right seam to extend if a more sensitive
+  field is ever added.
+- **Business-hour SLA evaluation** - blocked on the source pack actually
+  defining a business calendar; nothing to build without that input.
