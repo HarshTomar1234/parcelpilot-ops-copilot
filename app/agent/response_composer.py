@@ -21,8 +21,14 @@ from app.observability.tracing import RequestContext
 _SYSTEM_PROMPT_NAME = "support_agent_system"
 
 
-def _render_user_prompt(pack: EvidencePack, trust_state: TrustState) -> str:
-    lines = [f"Question: {pack.question}", ""]
+def _render_evidence_blocks(pack: EvidencePack) -> list[str]:
+    """Evidence, deterministic result(s), assumptions, and conflicts - the
+    facts a grounded answer is actually built from. Shared by the initial
+    compose and the repair prompt: a repair call that only sees the valid
+    marker *labels* (no underlying values) cannot rewrite a grounded
+    answer - it can only ask for the facts back, which is exactly the
+    failure a live run demonstrated before this was shared."""
+    lines: list[str] = []
 
     if pack.citations:
         lines.append("Evidence (cite using these exact [source_id:locator] markers):")
@@ -52,6 +58,13 @@ def _render_user_prompt(pack: EvidencePack, trust_state: TrustState) -> str:
             )
         lines.append("")
 
+    return lines
+
+
+def _render_user_prompt(pack: EvidencePack, trust_state: TrustState) -> str:
+    lines = [f"Question: {pack.question}", ""]
+    lines += _render_evidence_blocks(pack)
+
     lines.append(f"Trust state (backend-determined, do not restate a higher confidence): "
                   f"{trust_state.value}")
     if pack.needs_human_review:
@@ -71,22 +84,21 @@ def _render_repair_prompt(
     pack: EvidencePack, trust_state: TrustState, previous_answer: str, invalid_markers: list[str]
 ) -> str:
     lines = [
+        f"Question: {pack.question}",
+        "",
         "Your previous answer cited source markers that do not exist in the evidence "
         "provided. Rewrite the answer using ONLY the exact markers listed below - do not "
         "invent a marker or reuse an invalid one.",
         "",
         "Invalid markers you used: " + ", ".join(f"[{m}]" for m in invalid_markers),
         "",
-        "Valid markers (cite using exactly these forms):",
     ]
-    for ref in pack.citations:
-        note = f" {ref.note}" if ref.note else ""
-        lines.append(f"- [{citation_key(ref)}]{note}")
+    lines += _render_evidence_blocks(pack)
     lines += [
-        "",
         f"Previous answer:\n{previous_answer}",
         "",
-        "Write a corrected, concise, grounded answer using only the valid markers above. "
+        "Write a corrected, concise, grounded answer using only the valid markers and "
+        "deterministic result(s) above. "
         f"State the trust level plainly if it is not CONFIDENT ({trust_state.value}).",
     ]
     return "\n".join(lines)
