@@ -69,14 +69,11 @@ def test_actions_enumeration_returns_generic_not_found_for_random_ids(client):
     assert all("no action" in b for b in seen_bodies)
 
 
-def test_another_users_action_is_not_found_not_forbidden_confirming_existence(client):
-    """A real action that exists but belongs to another user still comes
-    back distinguishable (403, per the ownership check) from one that
-    never existed (404) - documented here as the one place existence
-    IS technically observable (a deliberate, minimal trade-off: the
-    owner-vs-admin check needs to read the record first). Both paths are
-    checked so the boundary is explicit, not accidentally more revealing
-    than this."""
+def test_another_users_action_is_not_distinguishable_from_a_nonexistent_one(client):
+    """Finding F5 (fixed): GET /api/actions/{id} now returns the same 404
+    for an action that exists but belongs to someone else as for one
+    that never existed at all - enumeration can no longer confirm
+    another user's action exists through this endpoint."""
     prep = client.post(
         "/api/actions/prepare", json={"ticket_id": "FXT-501", "reason": "x"},
         headers={"X-Demo-User": "support_agent"},
@@ -89,10 +86,23 @@ def test_another_users_action_is_not_found_not_forbidden_confirming_existence(cl
     never_existed = client.get(
         "/api/actions/ACT-000000000000", headers={"X-Demo-User": "restricted_support"}
     )
-    assert exists_but_forbidden.status_code == 403
+    assert exists_but_forbidden.status_code == 404
     assert never_existed.status_code == 404
+    # Same generic detail shape for both - "no action <id>" - not a
+    # different message that would hint one case is different from
+    # the other.
+    assert exists_but_forbidden.json()["detail"].startswith("no action ")
+    assert never_existed.json()["detail"].startswith("no action ")
     # Neither body leaks the target ticket, reason, or evidence.
     assert "FXT-501" not in exists_but_forbidden.text
+
+    # Owner and admin both still see it.
+    as_owner = client.get(
+        f"/api/actions/{action_id}", headers={"X-Demo-User": "support_agent"}
+    )
+    as_admin = client.get(f"/api/actions/{action_id}", headers={"X-Demo-User": "ops_admin"})
+    assert as_owner.status_code == 200
+    assert as_admin.status_code == 200
 
 
 def test_radar_alert_enumeration_from_unauthorized_scope_is_not_found(client):

@@ -92,6 +92,9 @@ def test_only_the_preparing_user_or_admin_can_execute(client):
 
 
 def test_get_action_denies_a_non_owner_non_admin_caller(client):
+    """A non-owner's denial is a plain 404, indistinguishable from a
+    nonexistent action_id (finding F5, final release hardening) -
+    enumeration cannot confirm another user's action exists."""
     prep = client.post(
         "/api/actions/prepare",
         json={"ticket_id": "FXT-501", "reason": "read test"},
@@ -102,7 +105,7 @@ def test_get_action_denies_a_non_owner_non_admin_caller(client):
     resp = client.get(
         f"/api/actions/{action_id}", headers={"X-Demo-User": "restricted_support"}
     )
-    assert resp.status_code == 403
+    assert resp.status_code == 404
 
     resp = client.get(f"/api/actions/{action_id}", headers={"X-Demo-User": "ops_admin"})
     assert resp.status_code == 200

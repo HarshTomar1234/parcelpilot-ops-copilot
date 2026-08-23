@@ -12,6 +12,14 @@ one user). The ownership check below is the one piece of hardening this
 phase adds at the API boundary specifically because execute is now a
 reachable HTTP endpoint: only the user who prepared the action (or an
 operations_admin) may call execute or read it back.
+
+GET /api/actions/{id} normalizes a non-owner's denial to 404, same as a
+truly unknown ID (final release hardening, finding F5) - enumeration
+cannot distinguish "never existed" from "exists but isn't yours" through
+this endpoint. POST /api/actions/execute keeps a distinct 403 for a
+non-owner: unlike a passive GET, the caller reaching execute already has
+the action_id from their own prepare/confirm flow, so a mutating-action
+denial being explicit is more useful than it is revealing.
 """
 
 from __future__ import annotations
@@ -53,6 +61,19 @@ def _require_owner_or_admin(conn: sqlite3.Connection, action_id: str, user: Demo
         raise HTTPException(status_code=404, detail=f"no action {action_id}")
     if user.role is not Role.OPERATIONS_ADMIN and record.user_id != user.id:
         raise HTTPException(status_code=403, detail="not authorized to access this action")
+
+
+def _get_owned_action_or_404(
+    conn: sqlite3.Connection, action_id: str, user: DemoUser
+) -> ActionOutcome:
+    """A non-owner and a nonexistent action_id are indistinguishable
+    here - both a plain 404 with the same generic detail message, so a
+    caller who already knows/guesses an action_id can't use this
+    endpoint to confirm another user's action exists."""
+    record = get_action(conn, action_id)
+    if record is None or (user.role is not Role.OPERATIONS_ADMIN and record.user_id != user.id):
+        raise HTTPException(status_code=404, detail=f"no action {action_id}")
+    return ActionOutcome(success=True, record=record)
 
 
 @router.post("/api/actions/prepare", response_model=ActionResponse)
@@ -124,7 +145,5 @@ def get_action_route(
     user: DemoUser = Depends(get_current_user),
     conn: sqlite3.Connection = Depends(get_conn),
 ) -> ActionResponse:
-    _require_owner_or_admin(conn, action_id, user)
-    record = get_action(conn, action_id)
-    assert record is not None  # _require_owner_or_admin already 404s otherwise
-    return ActionResponse(outcome=ActionOutcome(success=True, record=record), viewed_as=user)
+    outcome = _get_owned_action_or_404(conn, action_id, user)
+    return ActionResponse(outcome=outcome, viewed_as=user)
