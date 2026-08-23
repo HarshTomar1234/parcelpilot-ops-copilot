@@ -217,12 +217,18 @@ function renderChatResult(data) {
 
   const foot = document.createElement("footer");
   foot.className = "result-meta";
-  foot.innerHTML =
-    `<span>intent: ${r.intent || "-"}</span>` +
-    `<span>state trace: ${r.state_trace.join(" -> ")}</span>` +
-    `<span>latency: ${r.total_latency_ms.toFixed(1)} ms</span>` +
-    `<span>cost: $${r.total_cost_usd.toFixed(6)}</span>` +
-    `<span>request: ${r.request_id}</span>`;
+  const metaLine = document.createElement("div");
+  metaLine.className = "row";
+  metaLine.innerHTML =
+    `<span><strong>Intent:</strong> ${r.intent || "-"}</span>` +
+    `<span><strong>Latency:</strong> ${r.total_latency_ms.toFixed(1)} ms</span>` +
+    `<span><strong>Cost:</strong> $${r.total_cost_usd.toFixed(6)}</span>` +
+    `<span><strong>Request ID:</strong> ${r.request_id}</span>`;
+  const traceLine = document.createElement("div");
+  traceLine.className = "state-trace";
+  traceLine.innerHTML = `<strong>State trace:</strong> ${r.state_trace.join(" &rarr; ")}`;
+  foot.appendChild(metaLine);
+  foot.appendChild(traceLine);
   card.appendChild(foot);
 
   out.appendChild(card);
