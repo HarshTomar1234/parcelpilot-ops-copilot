@@ -20,6 +20,20 @@ from app.observability.tracing import RequestContext
 
 _SYSTEM_PROMPT_NAME = "support_agent_system"
 
+# The system prompt describes three tools the agent "has" - true for the
+# planning stage, but this specific call never sends a tools= schema (see
+# app/llm/types.py::LLMRequest, which has no such field): it is a plain
+# text completion over evidence already gathered. A live model, primed by
+# that system prompt, can otherwise read this as an unfinished agentic
+# turn and ask permission to "proceed with lookups" instead of answering
+# - reproduced live against real_pack TKT-450 before this notice existed.
+_ALREADY_EXECUTED_NOTICE = (
+    "Your tools already ran for this request; their results are the evidence and "
+    "deterministic result(s) below - this message gives you no ability to call a tool. "
+    "Do not ask to look anything up, request permission, or propose next steps: write "
+    "the final answer now, directly, using only what is given below."
+)
+
 
 def _render_evidence_blocks(pack: EvidencePack) -> list[str]:
     """Evidence, deterministic result(s), assumptions, and conflicts - the
@@ -62,7 +76,7 @@ def _render_evidence_blocks(pack: EvidencePack) -> list[str]:
 
 
 def _render_user_prompt(pack: EvidencePack, trust_state: TrustState) -> str:
-    lines = [f"Question: {pack.question}", ""]
+    lines = [f"Question: {pack.question}", "", _ALREADY_EXECUTED_NOTICE, ""]
     lines += _render_evidence_blocks(pack)
 
     lines.append(f"Trust state (backend-determined, do not restate a higher confidence): "
@@ -85,6 +99,8 @@ def _render_repair_prompt(
 ) -> str:
     lines = [
         f"Question: {pack.question}",
+        "",
+        _ALREADY_EXECUTED_NOTICE,
         "",
         "Your previous answer cited source markers that do not exist in the evidence "
         "provided. Rewrite the answer using ONLY the exact markers listed below - do not "
