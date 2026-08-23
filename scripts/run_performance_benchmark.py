@@ -21,8 +21,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app.authorization.context import INTERNAL_SYSTEM_CONTEXT  # noqa: E402
+from app.actions.workflow import confirm_action, execute_action, prepare_escalation  # noqa: E402
+from app.authorization.context import INTERNAL_SYSTEM_CONTEXT, AuthContext, Role  # noqa: E402
 from app.db.connection import connect  # noqa: E402
+from app.detection.service import run_operations_radar  # noqa: E402
 from app.domain.cancellation import evaluate_cancellation  # noqa: E402
 from app.domain.service_credit import evaluate_service_credit  # noqa: E402
 from app.domain.severity import classify_severity  # noqa: E402
@@ -93,6 +95,9 @@ def run_benchmark(source_dir: Path, db_path: Path) -> dict:
         ticket = get_ticket(conn, ticket_id, auth, tz)
         _bench(results["classify_severity"], lambda t=ticket: classify_severity(t, conn))
 
+    action_results = _bench_action_workflow(conn, ticket_ids, auth, clock)
+    detection_results = _bench_operations_radar(conn, account_ids, clock)
+
     conn.close()
     return {
         "repetitions_per_operation": REPETITIONS,
@@ -100,7 +105,68 @@ def run_benchmark(source_dir: Path, db_path: Path) -> dict:
             name: {"p50_ms": round(t.p50, 4), "p95_ms": round(t.p95, 4), "count": t.count}
             for name, t in results.items()
         },
+        "action_workflow": {
+            name: {"p50_ms": round(t.p50, 4), "p95_ms": round(t.p95, 4), "count": t.count}
+            for name, t in action_results.items()
+        },
+        "operations_radar": {
+            name: {"p50_ms": round(t.p50, 4), "p95_ms": round(t.p95, 4), "count": t.count}
+            for name, t in detection_results.items()
+        },
     }
+
+
+def _bench_operations_radar(conn, account_ids: list[str], clock) -> dict[str, Timings]:
+    """Phase 5 s15: full-snapshot detection vs. a single-account-scoped
+    query, both against the real pack."""
+    results = {"full_snapshot_scan": Timings(), "scoped_account_query": Timings()}
+    for _ in range(REPETITIONS):
+        with results["full_snapshot_scan"].measure():
+            run_operations_radar(conn, INTERNAL_SYSTEM_CONTEXT, clock)
+    if account_ids:
+        scoped_auth = AuthContext(role=Role.SUPPORT_AGENT, account_scope=[account_ids[0]])
+        for _ in range(REPETITIONS):
+            with results["scoped_account_query"].measure():
+                run_operations_radar(conn, scoped_auth, clock)
+    return results
+
+
+def _bench_action_workflow(conn, ticket_ids: list[str], auth, clock) -> dict[str, Timings]:
+    """Phase 4 s13: prepare/confirm/execute latency, measured separately
+    from the table above and captioned as mock-executor latency only - no
+    real external action system exists to call, so this can never be read
+    as a production external-action latency claim."""
+    eligible_ticket_id = None
+    for tid in ticket_ids:
+        outcome = calculate_sla(conn, tid, auth, clock)
+        if outcome.result and (outcome.result.severity.value == "P1" or outcome.result.breached):
+            eligible_ticket_id = tid
+            break
+    results = {
+        "prepare_escalation": Timings(), "confirm_action": Timings(), "execute_action": Timings(),
+    }
+    if eligible_ticket_id is None:
+        return results  # no P1/breached ticket in this pack - nothing eligible to benchmark
+
+    for i in range(REPETITIONS):
+        with results["prepare_escalation"].measure():
+            outcome = prepare_escalation(
+                conn, eligible_ticket_id, "perf benchmark", auth, clock,
+                f"bench-user-{i}", f"bench-req-{i}",
+            )
+        assert outcome.record is not None
+        action_id, payload_hash = outcome.record.action_id, outcome.record.payload_hash
+
+        with results["confirm_action"].measure():
+            confirmed = confirm_action(
+                conn, action_id, payload_hash, auth, clock, f"bench-user-{i}"
+            )
+        assert confirmed.record is not None
+
+        with results["execute_action"].measure():
+            execute_action(conn, action_id, clock)
+
+    return results
 
 
 def render_report(result: dict) -> str:
@@ -117,6 +183,37 @@ def render_report(result: dict) -> str:
         "|---|---|---|---|",
     ]
     for name, stats in result["operations"].items():
+        lines.append(f"| {name} | {stats['p50_ms']} | {stats['p95_ms']} | {stats['count']} |")
+
+    lines += [
+        "",
+        "## Action workflow (Phase 4)",
+        "",
+        "**Mock-executor latency only.** No real external action system exists to call - "
+        "execute_action only updates the local actions audit row. This is not a production "
+        "external-action latency claim. Unlike the read-only table above, every action "
+        "workflow call durably commits its audit row to disk (sqlite3.Connection.commit()) "
+        "before returning, which is why these numbers run roughly 1000x higher - that is a "
+        "deliberate durability choice for the audit trail, not something to optimize away.",
+        "",
+        "| Operation | p50 (ms) | p95 (ms) | n |",
+        "|---|---|---|---|",
+    ]
+    for name, stats in result["action_workflow"].items():
+        lines.append(f"| {name} | {stats['p50_ms']} | {stats['p95_ms']} | {stats['count']} |")
+
+    lines += [
+        "",
+        "## Operations Radar (Phase 5)",
+        "",
+        "`full_snapshot_scan` runs every detection rule unrestricted (all accounts); "
+        "`scoped_account_query` runs the same with the caller restricted to one account. "
+        "Both measured against the real pack, not the fixture corpus.",
+        "",
+        "| Operation | p50 (ms) | p95 (ms) | n |",
+        "|---|---|---|---|",
+    ]
+    for name, stats in result["operations_radar"].items():
         lines.append(f"| {name} | {stats['p50_ms']} | {stats['p95_ms']} | {stats['count']} |")
     return "\n".join(lines) + "\n"
 

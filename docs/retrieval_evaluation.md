@@ -16,7 +16,7 @@ python scripts/run_retrieval_eval.py --source-dir "<pack>/source-pack"
 - Recall@3: **100%**
 - Recall@5: **100%**
 - Source hit rate (expected sources actually retrieved, of all expected-source citations across eligible cases): **96%**
-- Retrieval latency: p50 **0.38 ms**, p95 **0.46 ms** (16 queries, local SQLite, cold connection per run)
+- Retrieval latency: p50 **0.38 ms**, p95 **0.57 ms** (16 queries, local SQLite, cold connection per run)
 
 ## Per-case detail
 

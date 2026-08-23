@@ -5,7 +5,7 @@ contains. Status of every ADR here: **Accepted (Phase 0)** unless noted.
 
 ---
 
-## ADR-001 â€” Build the internal ops copilot, not the customer-facing bot
+## ADR-001 — Build the internal ops copilot, not the customer-facing bot
 
 **Context.** The brief allows either, or both. The pack's centre of gravity is
 internal: cross-account tickets, historical resolutions flagged as unreliable,
@@ -19,11 +19,11 @@ view for authorized support and operations users" (extension Problem 1).
 customer identity, which is a harder and more interesting test. Operations Radar
 becomes a first-class surface rather than a bolt-on. If a customer-facing mode is
 added later it is a narrower special case of the same scoping (one account, no
-aggregates, no historical resolutions) â€” the model does not need to change.
+aggregates, no historical resolutions) — the model does not need to change.
 
 ---
 
-## ADR-002 â€” Modular monolith, SQLite, no microservices
+## ADR-002 — Modular monolith, SQLite, no microservices
 
 **Decision.** FastAPI + Pydantic v2 + SQLite in one deployable. Documents,
 structured data, audit, and action state all live in one SQLite file built by an
@@ -39,7 +39,7 @@ Postgres is documented, not built.
 
 ---
 
-## ADR-003 â€” Deterministic BM25 retrieval first; embeddings only if measured to help
+## ADR-003 — Deterministic BM25 retrieval first; embeddings only if measured to help
 
 **Decision.** SQLite FTS5/BM25 over page- and section-aware chunks, with metadata
 filters (`authority_class`, `status`, `account_scope`) applied **before** ranking.
@@ -48,7 +48,7 @@ No embeddings in Phase 1.
 **Rationale.** Six one-page documents with distinctive vocabulary
 ("cancellation fee", "service credit", "first-response", "KI-208"). Lexical
 search is very likely sufficient, is deterministic, adds no model latency or
-cost, and is trivially inspectable â€” which matters more than recall here because
+cost, and is trivially inspectable — which matters more than recall here because
 every answer must be citable.
 
 **Revisit trigger.** If Phase 7 retrieval Recall@K on the golden set falls below
@@ -57,27 +57,27 @@ BM25 remains the fallback.
 
 ---
 
-## ADR-004 â€” Source authority is metadata-driven, and the ranking is quoted, not invented
+## ADR-004 — Source authority is metadata-driven, and the ranking is quoted, not invented
 
 **Decision.** Every chunk carries `authority_class`; precedence is
 `AGREEMENT` > `POLICY_CURRENT` > `PRODUCT_DOC` > `HISTORICAL`, with `DEPRECATED`
 excluded from answer construction. The ranking is taken verbatim from Support
-Policy v3 Â§1 (see `initial_rules.md` R1).
+Policy v3 §1 (see `initial_rules.md` R1).
 
-**Sub-decision â€” scoped override.** An agreement overrides only clauses it
-addresses. The pack proves this is necessary in both directions: LumenWorks Â§2
-*declines* to override cancellation terms, and LumenWorks Â§3 *raises* the credit
+**Sub-decision — scoped override.** An agreement overrides only clauses it
+addresses. The pack proves this is necessary in both directions: LumenWorks §2
+*declines* to override cancellation terms, and LumenWorks §3 *raises* the credit
 threshold so the agreement makes the customer **less** entitled than the default.
 A naive "agreement wins wholesale" rule produces wrong money on both.
 
 **Open question.** SOP v4 is not literally named in v3's precedence list. It is
 classed `POLICY_CURRENT` alongside v3. The two never address the same subject in
-this pack, so their relative order is never exercised â€” recorded so the inference
+this pack, so their relative order is never exercised — recorded so the inference
 is visible rather than silent.
 
 ---
 
-## ADR-005 â€” Snapshot time is the only clock
+## ADR-005 — Snapshot time is the only clock
 
 **Decision.** `2026-08-16 11:00 Asia/Kolkata`, parsed from the README sheet, is
 injected as the reference time for all dataset reasoning. The machine clock is
@@ -85,28 +85,28 @@ never read on an answer path.
 
 **Consequence.** Results are reproducible and the golden set stays valid
 indefinitely. All workbook datetimes are naive and treated as Asia/Kolkata
-(recorded assumption â€” no timezone column exists).
+(recorded assumption — no timezone column exists).
 
 ---
 
-## ADR-006 â€” An un-happened pickup accrues delay from the snapshot
+## ADR-006 — An un-happened pickup accrues delay from the snapshot
 
 **Context.** `ORD-2002` has `pickup_actual_at = null`, a window that ended at
 06:30, and `carrier_fault = true`. The SOP defines the delay as time "past the
 end of the scheduled pickup window" but does not spell out the still-open case.
 
 **Decision.** When `pickup_actual_at` is null, measure delay as
-`snapshot âˆ’ pickup_window_end` and label the result as *accruing*.
+`snapshot − pickup_window_end` and label the result as *accruing*.
 
-**Rationale.** The alternative â€” treating a pickup that never happened as
-zero delay â€” would deny a credit precisely when the failure is worst.
+**Rationale.** The alternative — treating a pickup that never happened as
+zero delay — would deny a credit precisely when the failure is worst.
 
 **Status.** Assumption, surfaced in the response. Flagged here because it is an
 inference, not quoted policy.
 
 ---
 
-## ADR-007 â€” Business hours are configuration, and business-hour SLAs are `CONDITIONAL`
+## ADR-007 — Business hours are configuration, and business-hour SLAs are `CONDITIONAL`
 
 **Context.** This is the single largest gap in the pack. Most SLA targets are
 expressed in "business hours" / "business days", none of which the pack defines,
@@ -127,7 +127,7 @@ be the two genuine breaches.
 
 ---
 
-## ADR-008 â€” SLA *compliance* is not measurable; only deadline vs snapshot is
+## ADR-008 — SLA *compliance* is not measurable; only deadline vs snapshot is
 
 **Context.** The workbook has no `first_response_at` column.
 
@@ -140,11 +140,11 @@ the confidently-incorrect failure mode the brief warns about.
 
 ---
 
-## ADR-009 â€” Severity is derived and labelled as an inference
+## ADR-009 — Severity is derived and labelled as an inference
 
 **Context.** No severity column exists; severity drives every SLA answer.
 
-**Decision.** Classify `description` against Support Policy v3 Â§2 with the
+**Decision.** Classify `description` against Support Policy v3 §2 with the
 matching definition text carried through as evidence. Severity is presented as a
 derived classification with its justification, not as a looked-up fact.
 
@@ -156,7 +156,7 @@ set pins the expected labels.
 
 ---
 
-## ADR-010 â€” Typed tools only; no model-generated SQL
+## ADR-010 — Typed tools only; no model-generated SQL
 
 **Decision.** Six tools: `search_documents`, `lookup_structured_data`,
 `calculate_support_outcome`, `prepare_action`, `confirm_action`, `detect_issues`.
@@ -169,7 +169,7 @@ requirement.
 
 ---
 
-## ADR-011 â€” Authorization is filter-before-query, enforced in the data layer
+## ADR-011 — Authorization is filter-before-query, enforced in the data layer
 
 **Decision.** Account scope and field allowlists are applied inside the data
 access layer, so an out-of-scope record is never loaded, never enters model
@@ -184,7 +184,7 @@ cannot receive a 10%-of-fee credit figure that reconstructs it.
 
 ---
 
-## ADR-012 â€” Two-phase actions with hash, expiry, and idempotency
+## ADR-012 — Two-phase actions with hash, expiry, and idempotency
 
 **Decision.** `prepare_action` is non-mutating and returns `action_id`, target,
 proposed changes, rationale, evidence, risk, `payload_hash`, `expires_at`.
@@ -192,12 +192,12 @@ proposed changes, rationale, evidence, risk, `payload_hash`, `expires_at`.
 evidence validity, current state, and prior execution before mutating.
 Execution is idempotent on `action_id`.
 
-**Rationale.** SOP v4 Â§3 already requires verification before a state-changing
+**Rationale.** SOP v4 §3 already requires verification before a state-changing
 action when data conflicts, so this is a business requirement, not just hygiene.
 
 ---
 
-## ADR-013 â€” Deterministic detection; the LLM only narrates
+## ADR-013 — Deterministic detection; the LLM only narrates
 
 **Decision.** Operations Radar rules are pure Python over the snapshot. Every
 alert carries `alert_id`, severity, reason, time window, threshold, count,
@@ -209,7 +209,7 @@ The LLM may summarise an alert; it may never produce a count or a causal claim.
 
 ---
 
-## ADR-014 â€” Provider-abstracted LLM with bounded budgets
+## ADR-014 — Provider-abstracted LLM with bounded budgets
 
 **Decision.** One `LLMProvider` interface; provider, model, timeouts, max output
 tokens, context budget, temperature, retries, and pricing metadata all live in
@@ -221,7 +221,7 @@ instrumented from the start.
 
 ---
 
-## ADR-015 â€” Source files stay out of the public repository
+## ADR-015 — Source files stay out of the public repository
 
 **Decision.** `D:\AI-Projects\parcelpilot-assessment` is never copied into the repo.
 `data/source_manifest.json` carries checksums and metadata so ingestion is
@@ -327,3 +327,75 @@ not what it meant when file-backed tracking was still the default.
 `scripts/run_deepeval_baseline.py --mlflow` both log real, queryable runs
 against it - verified by querying the run back, not just by a write that
 did not error.
+
+---
+
+## ADR-021 - Anthropic retries: classify by exception type, not blanket except
+
+**Context.** Phase 2's `AnthropicProvider` retried on any exception,
+including permanent failures (auth, malformed request, invalid model) that
+retrying cannot fix - Phase 3 pre-flight 2.4 flagged this.
+
+**Decision.** `app/llm/anthropic_provider.py` retries only
+`APIConnectionError`/`APITimeoutError`/`RateLimitError`/
+`InternalServerError`/`OverloadedError`/`ServiceUnavailableError` - a
+closed, named list. Everything else (including any future/unknown
+exception type) raises immediately. Backoff is exponential with full
+jitter (`uniform(0, min(max_delay, base * 2**attempt))`), bounded by
+`request.max_retries`, and the realized retry count is recorded on
+`LLMResponse.retries`.
+
+**Rationale, checked rather than assumed.** The SDK exposes a
+`RetryableError` marker class; inspecting `__mro__` on every relevant
+exception (`anthropic==1.0.0`) showed none of them actually inherit it, so
+it is not usable for this classification - a plausible-looking shortcut
+that turned out not to work, caught by checking rather than trusting the
+name.
+
+**Testing without a network call.** `tests/unit/test_anthropic_retry.py`
+monkeypatches `_client.messages.create` to raise real SDK exception
+instances (built from real `httpx2` - anthropic's vendored httpx fork -
+`Request`/`Response` objects, not a duck-typed stand-in that might not
+satisfy the exception's own `__init__`) on a scripted schedule, and
+replaces `sleep_fn` with a recorder. 13 tests run in 0.14s and prove: every
+transient type retries and eventually succeeds; every permanent type
+raises on the first attempt with zero retries and zero backoff calls;
+retries exhaust and re-raise the transient error past `max_retries`; and
+backoff delays stay within the configured bounds.
+
+---
+
+## ADR-022 - Rules are declarative data, and the registries are injectable
+
+**Context.** Building a fixture-backed public CI tier (Phase 3 pre-flight
+2.1) meant proving `app/domain/*.py` works for an account/agreement pair
+that has never existed in the real pack. It didn't, at first: `_FEE_RULES`
+and `_CREDIT_RULES` were `{source_id: bespoke_python_function}` dispatch
+tables hardcoded to the real `SRC-03`/`SRC-05`/`SRC-06` - not a per-
+customer branch (2.6's literal example), but the same coupling one level
+more abstract, and it would `KeyError` on any fixture source_id.
+
+**Decision.** Rule *shapes* are now data: `CancellationFeeRule` (`kind:
+"threshold_fee" | "full_waiver"`, with parameters) and `ServiceCreditRule`
+(`kind: "percentage_with_cap" | "fixed_amount"`, with parameters) replace
+the bespoke functions. `resolve_applicability()`, `evaluate_cancellation()`,
+`evaluate_service_credit()`, and `calculate_sla()` all gained `overrides`/
+`defaults`/`fee_rules`/`credit_rules` keyword arguments defaulting to the
+real registries - production call sites never pass them; tests inject
+`tests/fixtures/seed_fixture_db.py`'s fabricated registries instead.
+
+**Verification, not assertion.** Every fixture number
+(`tests/fixture_backed/test_domain_rules.py`,
+`test_sla_and_severity.py`) was computed by actually running the real
+domain functions against the fixture data before being written into an
+assertion - not derived on paper and hoped to match. Re-ran the existing
+160 real-pack tests after the refactor (same numbers: `ORD-1001` fee
+`0.0`, `ORD-2001` fee `250.0`, `ORD-2002` credit `300.0`) to confirm the
+refactor changed nothing about real-pack behavior.
+
+**Consequence.** Adding a new real agreement is now a two-part *data*
+change (a `AgreementOverride` entry, a rule-shape entry) with zero new
+Python logic if the new agreement's rule fits an existing shape - and a
+new rule shape (a third `kind`) is the one case that still requires a
+code change, which is correct: that is a genuinely new kind of clause, not
+a new customer.

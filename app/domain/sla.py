@@ -23,7 +23,13 @@ from app.domain.outcomes import Conflict, DecisionResult, TrustState
 from app.domain.severity import classify_severity
 from app.models.enums import Severity
 from app.models.structured import Account
-from app.policy.applicability import ClauseTopic, resolve_applicability
+from app.policy.applicability import (
+    AGREEMENT_OVERRIDES,
+    DEFAULT_SOURCE,
+    AgreementOverride,
+    ClauseTopic,
+    resolve_applicability,
+)
 from app.structured_data.repository import get_account, get_ticket
 from app.time.clock import SnapshotClock, tz_of
 
@@ -44,15 +50,34 @@ class SlaOutcome(BaseModel):
 def _lookup_sla_target(
     conn: sqlite3.Connection, source_id: str, account: Account, severity: Severity
 ) -> sqlite3.Row | None:
+    """An account-specific row always wins over a plan-level default row for
+    the same source_id. Without this ORDER BY, "which row wins" would depend
+    on SQLite's query-planner choice of scan path for the OR clause - which
+    happens to already favor the account-specific row on the current
+    sla_targets unique index, but that is an incidental property of one
+    index's column order, not a guarantee. Made explicit so the precedence
+    holds regardless of the planner's choice, the SQLite version, or a
+    future schema/index change - and is directly tested rather than assumed.
+    In today's real data this is unreachable (a source_id is either wholly
+    plan-scoped or wholly account-scoped, so at most one row can ever
+    match); the test constructs the ambiguity synthetically.
+    """
     return conn.execute(
         "SELECT * FROM sla_targets WHERE source_id = ? AND severity = ? "
-        "AND (plan = ? OR account_id = ?)",
+        "AND (plan = ? OR account_id = ?) "
+        "ORDER BY (account_id IS NOT NULL) DESC LIMIT 1",
         (source_id, severity.value, account.plan, account.account_id),
     ).fetchone()
 
 
 def calculate_sla(
-    conn: sqlite3.Connection, ticket_id: str, auth: AuthContext, clock: SnapshotClock
+    conn: sqlite3.Connection,
+    ticket_id: str,
+    auth: AuthContext,
+    clock: SnapshotClock,
+    *,
+    overrides: tuple[AgreementOverride, ...] = AGREEMENT_OVERRIDES,
+    defaults: dict[ClauseTopic, tuple[str, str] | None] = DEFAULT_SOURCE,
 ) -> DecisionResult[SlaOutcome]:
     snapshot = clock.now()
     ticket = get_ticket(conn, ticket_id, auth, tz_of(clock))
@@ -71,7 +96,8 @@ def calculate_sla(
     severity = severity_result.result.severity
 
     applicability = resolve_applicability(
-        conn, ClauseTopic.SLA_FIRST_RESPONSE, account.account_id, snapshot.date()
+        conn, ClauseTopic.SLA_FIRST_RESPONSE, account.account_id, snapshot.date(),
+        overrides=overrides, defaults=defaults,
     )
     target = _lookup_sla_target(conn, applicability.winning_source_id, account, severity)
     if target is None:

@@ -1,8 +1,7 @@
--- ParcelPilot Ops Copilot - Phase 1 schema.
+-- ParcelPilot Ops Copilot - Phase 1 schema, extended in Phase 4 with the
+-- `actions` audit trail (prepare/confirm/execute - app/actions/).
 -- Mirrors the real workbook schema (docs/data_dictionary.md) and the real
 -- source pack (docs/source_inventory.md). No generic EAV tables.
--- audit_events is deferred to Phase 5 (action confirmation) - not needed
--- by anything Phase 1 builds.
 
 PRAGMA foreign_keys = ON;
 
@@ -126,3 +125,31 @@ CREATE TABLE tickets (
 CREATE INDEX idx_tickets_account_id ON tickets (account_id);
 CREATE INDEX idx_tickets_status ON tickets (status);
 CREATE INDEX idx_tickets_created_at ON tickets (created_at);
+
+-- Phase 4: the state-changing action audit trail (app/actions/). Every
+-- prepare/confirm/execute call writes or updates exactly one row here -
+-- this table IS the audit log, not a separate side channel, so there is
+-- never a code path that mutates action state without leaving a record.
+CREATE TABLE actions (
+    action_id        TEXT PRIMARY KEY,
+    request_id       TEXT NOT NULL,
+    user_id          TEXT NOT NULL,
+    action_type      TEXT NOT NULL,
+    target           TEXT NOT NULL,
+    proposed_change  TEXT NOT NULL,  -- JSON
+    reason           TEXT NOT NULL,
+    evidence         TEXT NOT NULL,  -- JSON list[EvidenceRef]
+    risk             TEXT NOT NULL,
+    payload_hash     TEXT NOT NULL,
+    status           TEXT NOT NULL,
+    prepared_at      TEXT NOT NULL,
+    expires_at       TEXT NOT NULL,
+    confirmed_at     TEXT,
+    executed_at      TEXT,
+    idempotency_key  TEXT NOT NULL,
+    failure_reason   TEXT
+);
+
+CREATE INDEX idx_actions_status ON actions (status);
+CREATE INDEX idx_actions_target ON actions (target);
+CREATE INDEX idx_actions_user_id ON actions (user_id);

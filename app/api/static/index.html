@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ParcelPilot Ops Copilot</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <h1>ParcelPilot Ops Copilot</h1>
+    <div class="spacer"></div>
+    <div class="identity-picker">
+      <label for="identity-select">Viewing as</label>
+      <select id="identity-select"></select>
+      <span id="identity-role" class="badge neutral"></span>
+      <span id="identity-scope" class="muted small"></span>
+    </div>
+  </header>
+  <div id="snapshot-banner" class="snapshot-banner">Loading dataset snapshot...</div>
+
+  <nav class="tabs">
+    <button data-panel="panel-copilot" class="active">Support Copilot</button>
+    <button data-panel="panel-radar">Operations Radar</button>
+    <button data-panel="panel-actions">Action Panel</button>
+  </nav>
+
+  <main>
+    <section id="panel-copilot" class="panel active">
+      <div class="card">
+        <h3>Ask a question</h3>
+        <textarea id="question" placeholder="e.g. Is TKT-501 within its first-response SLA?"></textarea>
+        <div class="row" style="margin-top:8px;">
+          <button id="ask-button" class="primary">Ask</button>
+          <span class="muted small">Ctrl/Cmd + Enter to submit</span>
+        </div>
+      </div>
+      <div id="chat-result"></div>
+    </section>
+
+    <section id="panel-radar" class="panel">
+      <div class="card">
+        <h3>Run detection</h3>
+        <div class="filters">
+          <label><input type="checkbox" class="radar-type" value="sla_breach" checked> SLA breach</label>
+          <label><input type="checkbox" class="radar-type" value="sla_approaching" checked> SLA approaching</label>
+          <label><input type="checkbox" class="radar-type" value="recurring_issue" checked> Recurring issue</label>
+          <label><input type="checkbox" class="radar-type" value="known_issue_pattern" checked> Known issue pattern</label>
+          <label><input type="checkbox" class="radar-type" value="carrier_pattern" checked> Carrier pattern</label>
+          <label><input type="checkbox" class="radar-type" value="overdue_pickup" checked> Overdue pickup</label>
+        </div>
+        <div class="row">
+          <label class="small muted">Window (days)
+            <input type="number" id="radar-window" value="30" min="1" max="365" style="width:70px;" />
+          </label>
+          <label class="small muted">Severity
+            <select id="radar-severity-filter">
+              <option value="all">all</option>
+              <option value="critical">critical</option>
+              <option value="high">high</option>
+              <option value="medium">medium</option>
+              <option value="low">low</option>
+            </select>
+          </label>
+          <button id="radar-run-button" class="primary">Run Operations Radar</button>
+        </div>
+      </div>
+      <div id="radar-result"><div class="empty-state">No alerts fetched yet - run detection above.</div></div>
+    </section>
+
+    <section id="panel-actions" class="panel">
+      <div class="card">
+        <h3>Prepare escalation</h3>
+        <div class="row">
+          <input type="text" id="prepare-ticket-id" placeholder="Ticket ID, e.g. TKT-501" />
+        </div>
+        <div class="row" style="margin-top:8px;">
+          <input type="text" id="prepare-reason" placeholder="Reason for escalation" style="flex:1;" />
+        </div>
+        <div class="row" style="margin-top:8px;">
+          <button id="prepare-button" class="primary">Prepare</button>
+        </div>
+      </div>
+      <div id="action-result"><div class="empty-state">No action prepared yet.</div></div>
+    </section>
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>

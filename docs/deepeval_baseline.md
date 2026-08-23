@@ -1,8 +1,6 @@
 # DeepEval Baseline
 
-**No quality scores were produced.** DeepEval's LLM-judged metrics require the judge to return structured JSON verdicts; MockProvider returns a fixed placeholder string, which is not that. This is not a bug being routed around - it is the honest signal that a real score needs a real judge model. What this run *did* verify: retrieval via the real `search_documents` tool, `LLMTestCase` construction, and the `GatewayDeepEvalModel` bridge all execute correctly up to the point DeepEval calls the judge - the wiring works, the score does not exist yet. Re-run with `--provider anthropic --model <name>` and a real `ANTHROPIC_API_KEY` for genuine scores.
-
-DeepEval's error, for the first case it failed on: `Evaluation LLM outputted an invalid JSON. Please use a better evaluation model.`
+This run used `anthropic/claude-haiku-4-5-20251001` as both answerer and judge - these are real LLM-judged quality scores.
 
 ## Method
 
@@ -10,27 +8,29 @@ DeepEval's error, for the first case it failed on: `Evaluation LLM outputted an 
 
 ## Results
 
-- Provider: `mock` / model `mock-model`
-- Judge: `mock/mock-model`
-- Cases evaluated: **16** (scored: 0, harness-blocked: 16)
+- Provider: `anthropic` / model `claude-haiku-4-5-20251001`
+- Judge: `anthropic/claude-haiku-4-5-20251001`
+- Cases evaluated: **16** (scored: 16, harness-blocked: 0)
+- Mean contextual relevancy: **0.37**
+- Mean faithfulness: **0.96**
 
 ## Per-case results
 
 | Case | Contextual relevancy | Faithfulness |
 |---|---|---|
-| GC-001 | harness-blocked | harness-blocked |
-| GC-002 | harness-blocked | harness-blocked |
-| GC-003 | harness-blocked | harness-blocked |
-| GC-004 | harness-blocked | harness-blocked |
-| GC-005 | harness-blocked | harness-blocked |
-| GC-006 | harness-blocked | harness-blocked |
-| GC-007 | harness-blocked | harness-blocked |
-| GC-008 | harness-blocked | harness-blocked |
-| GC-009 | harness-blocked | harness-blocked |
-| GC-010 | harness-blocked | harness-blocked |
-| GC-011 | harness-blocked | harness-blocked |
-| GC-012 | harness-blocked | harness-blocked |
-| GC-013 | harness-blocked | harness-blocked |
-| GC-014 | harness-blocked | harness-blocked |
-| GC-016 | harness-blocked | harness-blocked |
-| GC-027 | harness-blocked | harness-blocked |
+| GC-001 | 0.57 | 1.00 |
+| GC-002 | 0.50 | 1.00 |
+| GC-003 | 0.67 | 1.00 |
+| GC-004 | 0.33 | 0.83 |
+| GC-005 | 0.33 | 1.00 |
+| GC-006 | 0.50 | 1.00 |
+| GC-007 | 0.43 | 1.00 |
+| GC-008 | 0.00 | 1.00 |
+| GC-009 | 0.20 | 1.00 |
+| GC-010 | 0.00 | 1.00 |
+| GC-011 | 0.25 | 1.00 |
+| GC-012 | 0.20 | 1.00 |
+| GC-013 | 0.50 | 0.50 |
+| GC-014 | 0.67 | 1.00 |
+| GC-016 | 0.20 | 1.00 |
+| GC-027 | 0.50 | 1.00 |

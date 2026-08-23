@@ -1,4 +1,4 @@
-.PHONY: ingest test eval deepeval perf lint typecheck check
+.PHONY: ingest test eval deepeval perf radar lint typecheck check
 
 SOURCE_DIR ?= ../parcelpilot-assessment/source-pack
 
@@ -17,10 +17,13 @@ deepeval:
 perf:
 	python scripts/run_performance_benchmark.py --source-dir "$(SOURCE_DIR)"
 
+radar:
+	python scripts/run_operations_radar_eval.py --source-dir "$(SOURCE_DIR)"
+
 lint:
 	ruff check app scripts tests
 
 typecheck:
-	pyright app scripts/ingest_sources.py scripts/run_retrieval_eval.py scripts/run_deepeval_baseline.py scripts/run_performance_benchmark.py tests
+	pyright app scripts/ingest_sources.py scripts/run_retrieval_eval.py scripts/run_deepeval_baseline.py scripts/run_performance_benchmark.py scripts/run_operations_radar_eval.py tests
 
 check: lint typecheck test
