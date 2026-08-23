@@ -11,8 +11,8 @@ This run used `anthropic/claude-haiku-4-5-20251001` as both answerer and judge -
 - Provider: `anthropic` / model `claude-haiku-4-5-20251001`
 - Judge: `anthropic/claude-haiku-4-5-20251001`
 - Cases evaluated: **16** (scored: 16, harness-blocked: 0)
-- Mean contextual relevancy: **0.36**
-- Mean faithfulness: **0.94**
+- Mean contextual relevancy: **0.37**
+- Mean faithfulness: **0.96**
 
 ## Per-case results
 
@@ -21,13 +21,13 @@ This run used `anthropic/claude-haiku-4-5-20251001` as both answerer and judge -
 | GC-001 | 0.57 | 1.00 |
 | GC-002 | 0.50 | 1.00 |
 | GC-003 | 0.67 | 1.00 |
-| GC-004 | 0.33 | 1.00 |
+| GC-004 | 0.33 | 0.83 |
 | GC-005 | 0.33 | 1.00 |
 | GC-006 | 0.50 | 1.00 |
-| GC-007 | 0.33 | 1.00 |
+| GC-007 | 0.43 | 1.00 |
 | GC-008 | 0.00 | 1.00 |
 | GC-009 | 0.20 | 1.00 |
-| GC-010 | 0.00 | 0.50 |
+| GC-010 | 0.00 | 1.00 |
 | GC-011 | 0.25 | 1.00 |
 | GC-012 | 0.20 | 1.00 |
 | GC-013 | 0.50 | 0.50 |
