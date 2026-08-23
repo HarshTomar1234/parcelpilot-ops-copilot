@@ -51,6 +51,15 @@ def _render_evidence_blocks(pack: EvidencePack) -> list[str]:
             lines.append(f"- [{citation_key(ref)}]{note}")
         lines.append("")
 
+    if pack.structured_facts:
+        lines.append(
+            "Structured record(s) looked up - the real, current field values; do not "
+            "alter them or infer a different value from other evidence below:"
+        )
+        for record in pack.structured_facts:
+            lines.append(f"- {record}")
+        lines.append("")
+
     if pack.domain_results:
         lines.append("Deterministic result(s) - do not recompute or alter these:")
         for result in pack.domain_results:

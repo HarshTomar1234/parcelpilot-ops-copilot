@@ -15,7 +15,17 @@ from app.agent.entities import EntityResolution
 from app.agent.intent import Intent
 from app.agent.tool_result import ToolResult
 from app.documents.retrieval import DocumentSearchResult
+from app.domain.evidence import cite_structured
 from app.domain.outcomes import Conflict, EvidenceRef, TrustState
+from app.models.structured import Account, Order, Ticket
+
+
+def _cite_record(record: Account | Order | Ticket) -> EvidenceRef:
+    if isinstance(record, Account):
+        return cite_structured("accounts", record.account_id)
+    if isinstance(record, Order):
+        return cite_structured("orders", record.order_id)
+    return cite_structured("tickets", record.ticket_id)
 
 
 class EvidencePack(BaseModel):
@@ -58,7 +68,16 @@ def build_evidence_pack(
             continue
         output = result.output
         if result.tool_name == "lookup_structured_data":
-            structured_facts.extend(record.model_dump(mode="json") for record in output.records)
+            # A record fetched here (e.g. an Account's real status/plan) is
+            # the ground truth for any question that never reaches
+            # calculate_support_outcome (order/ticket/account investigation
+            # intents). Both the raw fields (for the prompt) and a citation
+            # (so the model can reference it) are required, or the model has
+            # nothing but generic document text to answer from - reproduced
+            # live as a real account-status hallucination before this fix.
+            for record in output.records:
+                structured_facts.append(record.model_dump(mode="json"))
+                citations.append(_cite_record(record))
         elif result.tool_name == "search_documents":
             document_evidence.extend(output.results)
             for doc in output.results:
@@ -78,6 +97,20 @@ def build_evidence_pack(
             assumptions.extend(output.assumptions)
             conflicts.extend(output.conflicts)
             needs_human_review = needs_human_review or output.needs_human_review
+
+    # A calculation (e.g. evaluate_cancellation) already cites the same
+    # structured record its own lookup_structured_data step fetched, so the
+    # citation just added above for that record would otherwise duplicate
+    # it - keep the first occurrence only, by (source_id, locator).
+    seen_citation_keys: set[tuple[str, str | None]] = set()
+    deduped_citations: list[EvidenceRef] = []
+    for ref in citations:
+        key = (ref.source_id, ref.locator)
+        if key in seen_citation_keys:
+            continue
+        seen_citation_keys.add(key)
+        deduped_citations.append(ref)
+    citations = deduped_citations
 
     return EvidencePack(
         question=question,
