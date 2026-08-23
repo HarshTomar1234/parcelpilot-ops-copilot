@@ -136,6 +136,14 @@ def run_trajectory_eval(source_dir: Path, db_path: Path, provider_name: str, mod
         ),
         "status_checkable_cases": len(status_checks),
         "task_completion_scored": len(task_scores),
+        # A real LLM-judged score, computed for every case whose measure()
+        # call succeeded above - previously computed per-case (row["task_
+        # completion"]) but never aggregated or surfaced anywhere in the
+        # report, silently discarding the exact metric this project has
+        # documented as "harness-blocked" for five phases, for the first
+        # run where it was actually available. Found while running the
+        # first real live evaluation, not assumed.
+        "mean_task_completion": sum(task_scores) / len(task_scores) if task_scores else None,
         "task_completion_error": task_completion_error,
         "rows": rows,
     }
@@ -195,21 +203,29 @@ def render_report(result: dict) -> str:
             else ""
         )
     )
+    if result["mean_task_completion"] is not None:
+        lines.append(
+            f"- Mean task completion (real LLM-judged score, scored cases only): "
+            f"**{result['mean_task_completion']:.2f}**"
+        )
 
     lines += [
         "",
         "## Per-case results",
         "",
         "| Case | Tools expected | Tools called | Tool correctness | Status expected | "
-        "Status actual | Match |",
-        "|---|---|---|---|---|---|---|",
+        "Status actual | Match | Task completion |",
+        "|---|---|---|---|---|---|---|---|",
     ]
     for row in result["rows"]:
         match = "-" if row["status_match"] is None else ("yes" if row["status_match"] else "NO")
+        task_completion = (
+            "-" if row["task_completion"] is None else f"{row['task_completion']:.2f}"
+        )
         lines.append(
             f"| {row['id']} | {', '.join(row['expected_tools'])} | "
             f"{', '.join(row['actual_tools'])} | {row['tool_correctness']:.2f} | "
-            f"{row['expected_status']} | {row['actual_status']} | {match} |"
+            f"{row['expected_status']} | {row['actual_status']} | {match} | {task_completion} |"
         )
     return "\n".join(lines) + "\n"
 
@@ -239,6 +255,8 @@ def main() -> int:
         if result["status_match_rate"] is not None:
             metrics["status_match_rate"] = result["status_match_rate"]
         metrics["task_completion_scored"] = float(result["task_completion_scored"])
+        if result["mean_task_completion"] is not None:
+            metrics["mean_task_completion"] = result["mean_task_completion"]
         run = ExperimentRun.build(
             experiment_name="parcelpilot-agent-trajectory",
             provider=result["provider"],
