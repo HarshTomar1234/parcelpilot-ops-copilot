@@ -47,9 +47,15 @@ boundary this report validates.
 | Agent abuse + retrieval abuse | `test_agent_abuse.py` | 8 |
 | **Total** | | **114** |
 
-All 114 pass. Full project suite (including these): **445 passed, 0
-failed** (real pack); fixture-backed + red-team tiers never need the real
-pack or a live server.
+All 114 pass. Full project suite (including these, and the 8 new
+`app/agent/evidence_sufficiency.py` unit tests from the F4 fix):
+**453 passed, 0 failed** (real pack); fixture-backed + red-team tiers
+never need the real pack or a live server.
+
+Findings F4 and F5 below were originally opened as KNOWN LIMITATION in
+this report's first pass; both were subsequently fixed in the final
+release hardening phase and are recorded here as MITIGATED/FIXED, with
+the original finding text preserved for the record.
 
 ## Findings
 
@@ -119,49 +125,65 @@ pack or a live server.
   `check_same_thread=False` explicitly, with a comment pointing at why.
   No production code changed - this was a test-fixture-only gap.
 
-### F4 - Relevance floor doesn't fully filter every off-topic query (LOW, KNOWN LIMITATION)
+### F4 - Relevance floor doesn't fully filter every off-topic query (LOW, MITIGATED)
 
-- **Test:** `tests/red_team/test_agent_abuse.py::test_irrelevant_query_never_gets_a_fabricated_confident_answer`.
+- **Test:** `tests/red_team/test_agent_abuse.py::test_irrelevant_query_never_gets_a_fabricated_confident_answer`,
+  `tests/fixture_backed/test_evidence_sufficiency.py` (8 unit tests),
+  `tests/integration/test_agent_orchestrator.py`, plus real-pack
+  before/after evaluation runs.
 - **Expected (per prior evaluation docs' own framing):** an off-topic
   query like "What is the weather today?" returns `insufficient_evidence`.
-- **Observed:** against both the fixture corpus and the real pack, that
-  exact question returns `status: completed`, `trust_state: CONDITIONAL`
-  - `MIN_RELEVANCE_SCORE` still lets a couple of weakly-scoring chunks
-  through on this small a corpus, rather than rejecting all of them.
-- **Severity assessment:** not a security issue - the answer is never
-  `CONFIDENT`, never fabricates a citation, and never crosses an
-  authorization boundary. It's a retrieval-quality limitation (already
-  partially documented in `docs/evaluation_report.md` as "semantic
-  sufficiency... remains open"), now additionally confirmed to apply to
-  this specific "off-topic" case too, not just the harder semantic-gap
-  cases already on record.
-- **Resolution:** none applied - correcting relevance calibration is a
-  retrieval-quality tuning task, not a demonstrated safety failure, and
-  is out of scope for "fix preventable security/reliability failures."
-  Recorded as a known limitation, not silently left undocumented.
+- **Observed (before fix):** against both the fixture corpus and the real
+  pack, that exact question returned `status: completed`,
+  `trust_state: CONDITIONAL` - `MIN_RELEVANCE_SCORE` let a coincidentally-
+  scoring chunk through on a small corpus, rather than rejecting it.
+- **Resolution:** `app/agent/evidence_sufficiency.py` - a deterministic,
+  generic gate applied only to the document-search-only path (no domain
+  calculation grounding an answer already). Four signals: the existing
+  relevance floor, a score margin below it, meaningful query-token
+  overlap checked across every returned chunk (not just the top-scoring
+  one), and a corroborating-chunk-count requirement for a strong score
+  with no overlap. No keyword list, no example-specific special case.
+  Verified against the required test matrix (supported policy/order/SLA
+  questions still pass on real data; obviously unrelated, weakly-related,
+  and coincidentally-overlapping questions now correctly return
+  `insufficient_evidence`) and live against a rebuilt container. Real
+  before/after evaluation: agent status-match rate 0.88 -> 0.94 (golden
+  case GC-015 fixed), Recall@3/Recall@5 unchanged at 1.0/1.0 - recall for
+  genuinely supported queries was not reduced.
+- **Residual scope:** a harder, still-open problem - *semantic
+  sufficiency* (retrieved text that is topically strong and lexically
+  overlapping but doesn't contain the specific fact asked, golden case
+  GC-016) - is explicitly not solved by this fix and not claimed to be.
+  A lexical/score-based gate cannot resolve deep semantic mismatch by
+  construction; see `docs/evaluation_report.md`.
 
-### F5 - Action existence is technically observable via 403-vs-404 for a non-owner (INFO, KNOWN LIMITATION / accepted trade-off)
+### F5 - Action existence was technically observable via 403-vs-404 for a non-owner (INFO, MITIGATED)
 
-- **Test:** `tests/red_team/test_information_leakage.py::test_another_users_action_is_not_found_not_forbidden_confirming_existence`.
+- **Test:** `tests/red_team/test_information_leakage.py::test_another_users_action_is_not_distinguishable_from_a_nonexistent_one`,
+  `tests/fixture_backed/test_api_actions.py::test_get_action_denies_a_non_owner_non_admin_caller`,
+  plus a live verification against a rebuilt container.
 - **Expected:** enumeration cannot distinguish "this action never
   existed" from "it exists but you can't see it."
-- **Observed:** `GET /api/actions/{id}` returns `403` for an action that
-  exists but belongs to someone else, versus `404` for one that never
-  existed - the ownership check (`_require_owner_or_admin`) reads the
-  record before deciding, so its existence is technically distinguishable
-  from a truly-unknown ID.
-- **Severity assessment:** low - it reveals only that *an* action with
-  that ID exists, never its target, reason, evidence, or any other field
-  (verified in the same test: the ticket ID never appears in the 403
-  body). A real action ID is a random UUID fragment, not a guessable
-  sequence.
-- **Resolution:** none applied this phase - collapsing this into a
-  uniform 404 would require the ownership check to happen without ever
-  reading the record, which isn't how the existing Phase 4 action-store
-  API is shaped, and redesigning it wasn't in scope ("keep the current
-  single-row audit design unless a test demonstrates it's unsafe" - this
-  finding is a minor enumeration nuance, not a demonstrated unsafe
-  design). Documented explicitly rather than left implicit.
+- **Observed (before fix):** `GET /api/actions/{id}` returned `403` for
+  an action that exists but belongs to someone else, versus `404` for one
+  that never existed - the ownership check read the record before
+  deciding, so existence was technically distinguishable from a
+  truly-unknown ID.
+- **Resolution:** `app/api/routes/actions.py::_get_owned_action_or_404`
+  - `GET /api/actions/{id}` now returns the identical-shaped 404 for both
+  "never existed" and "exists but isn't yours"; owner and admin still get
+  `200`. Verified live: nonexistent action -> 404, another user's real
+  action -> 404 (same generic `"no action <id>"` detail shape, no ticket/
+  reason/evidence leaked), owner -> 200, admin -> 200.
+- **Deliberately unchanged:** `POST /api/actions/execute` keeps a
+  distinct `403` for a non-owner - the phase spec scoped this fix to
+  enumeration via `GET`, and a mutating-action denial is meaningfully
+  different from a passive read (the caller reaching `execute` already
+  has the action_id from their own prepare/confirm flow). Not a
+  redesign of the Phase 4 action-store API, per the standing instruction
+  to keep the existing single-row audit design unless a test demonstrates
+  it's unsafe.
 
 ## Severity summary
 
@@ -170,8 +192,8 @@ pack or a live server.
 | F1 - confirm/execute race condition | CRITICAL | MITIGATED |
 | F2 - entrypoint crash on bad secret | HIGH | MITIGATED |
 | F3 - test-fixture thread-affinity gap | MEDIUM | MITIGATED |
-| F4 - relevance floor incomplete on off-topic queries | LOW | KNOWN LIMITATION |
-| F5 - action existence observable via 403/404 | INFO | KNOWN LIMITATION |
+| F4 - relevance floor incomplete on off-topic queries | LOW | MITIGATED |
+| F5 - action existence observable via 403/404 (GET only) | INFO | MITIGATED |
 
 ## What passed outright (PASS, no finding)
 
@@ -217,13 +239,15 @@ pack or a live server.
 
 ## Residual risks
 
-- The relevance floor (F4) is corpus-score-distribution-dependent, not a
-  fixed guarantee - a differently-worded off-topic question could still
-  slip past it with `CONDITIONAL` trust. Never `CONFIDENT`, never
-  fabricated, but not a hard "no evidence" guarantee either.
-- Action-existence enumeration (F5) remains technically possible for an
-  authenticated-but-unauthorized caller who already has a valid action ID
-  - not exploitable to learn anything about the action's contents.
+- The evidence-sufficiency gate (F4, fixed) is a lexical/score-based
+  heuristic, not a semantic-understanding system - it closes the
+  zero-overlap/coincidental-match failure mode by construction, but a
+  topically-adjacent, factually-wrong match with real (if partial) token
+  overlap can still pass (golden case GC-016, unchanged, documented as an
+  open limitation, not claimed fixed).
+- `POST /api/actions/execute` still distinguishes a non-owner (403) from
+  a nonexistent action (404) - a deliberate scope decision (F5), not an
+  oversight; only `GET /api/actions/{id}` was normalized.
 - No live LLM has been exercised this phase either (no
   `ANTHROPIC_API_KEY` in this environment) - retry/fallback classification
   is unit-tested against real SDK exception *types*, not a live provider

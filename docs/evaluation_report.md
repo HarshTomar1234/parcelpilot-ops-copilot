@@ -8,8 +8,8 @@ here is estimated or projected.
 
 | Suite | Real pack | No pack (hosted CI) |
 |---|---|---|
-| Full `pytest` | 445 passed | 331 passed, 114 skipped, 0 failed |
-| `tests/fixture_backed/` only | 150 passed | 150 passed (never skips - see below) |
+| Full `pytest` | 453 passed | 339 passed, 114 skipped, 0 failed |
+| `tests/fixture_backed/` only | 158 passed | 158 passed (never skips - see below) |
 | `tests/red_team/` only | 114 passed | 114 passed (never skips - never needs the real pack) |
 
 (Requires the `api` extra - `pip install -e ".[dev,llm,evaluation,api]"` -
@@ -50,29 +50,33 @@ against the real pack, `MockProvider`:
 |---|---|---|
 | Cases evaluated | 19 | - |
 | Mean tool correctness | **0.84** | No (exact match) |
-| Status match rate | **0.88** (15/17 checkable) | No (exact match) |
+| Status match rate | **0.94** (16/17 checkable) | No (exact match) |
 | Task completion scored | 0 of 19 | Yes - harness-blocked, same limitation as RAG quality above |
 
 Tool correctness and status match are genuine, non-fabricated scores -
 they compare the real agent's actual tool calls and terminal status
 against the golden dataset and need no LLM judge.
 
-**Status-match rate progression this project: 0.71 -> 0.82 -> 0.88.**
-The first jump (fixing a bug that conflated an operational "needs human
-follow-up" flag with epistemic trust) and the second (adding the
-clarification gate for GC-002, with an aggregate-question carve-out for
-GC-028 added immediately after it introduced a regression there) are both
-documented in the private phase reports.
+**Status-match rate progression this project: 0.71 -> 0.82 -> 0.88 -> 0.94.**
+The first two jumps are documented in the private phase reports. The
+final jump (finding F4, final release hardening) fixed GC-015 - a
+question with no meaningful token overlap or corroborated strong score
+in its retrieved evidence now correctly returns `insufficient_evidence`
+via `app/agent/evidence_sufficiency.py`'s gate, instead of `completed`.
+Re-run before/after this exact fix: 0.88 -> 0.94, with retrieval
+Recall@3/5 (below) and every other real-pack test unchanged - the fix
+does not reduce recall for genuinely supported questions.
 
-The 2 remaining mismatches (GC-015, GC-016) are a documented, unfixed
-limitation, not a test gap: both retrieve strongly-scoring evidence (BM25
-top scores of -3.8 and -14.5 respectively - not weak matches) that simply
-doesn't contain the specific fact asked for (how to change a billing
-contact; the exact remaining service-credit balance this month). The
-Phase 4 lexical-relevance threshold (`MIN_RELEVANCE_SCORE`) fixes
-*off-topic* questions like "What is the weather today?" - a different,
-easier problem than *semantic sufficiency* (does the retrieved text
-actually answer what was asked), which remains open.
+The 1 remaining mismatch (GC-016) is a documented, unfixed limitation,
+not a test gap: it retrieves strongly-scoring evidence (BM25 top score of
+-3.8 - not a weak match) that simply doesn't contain the specific fact
+asked for (the exact remaining service-credit balance this month). The
+evidence-sufficiency gate fixes *off-topic-with-no-real-overlap*
+questions (F4, generic by construction - no keyword list, no
+example-specific special case); GC-016 is a different, harder problem -
+*semantic sufficiency* (does the retrieved text actually answer what was
+asked, even when it's topically strong and lexically overlapping) -
+which remains open, same as GC-015 was before this fix.
 
 ## Security
 
@@ -283,6 +287,76 @@ container, real pack, `MockProvider` (see
 This is a regression/smoke test at this corpus size, not a production
 scalability claim.
 
+## Final release hardening
+
+Two residual issues from the red-team phase were fixed and re-verified
+before freeze - full detail in [`red_team_report.md`](red_team_report.md):
+
+- **F4 - evidence sufficiency.** A clearly off-topic or unsupported
+  question could retrieve a coincidentally-scoring document chunk and
+  reach `completed`/`CONDITIONAL` instead of `insufficient_evidence`.
+  Fixed with a deterministic, generic multi-signal gate
+  (`app/agent/evidence_sufficiency.py`: relevance score, score margin,
+  query-token overlap across every returned chunk, and corroborating
+  chunk count - no keyword list, no example-specific special case).
+  Verified with the required matrix (supported policy/order/SLA
+  questions still pass; obviously unrelated, weakly-related-but-
+  unsupported, and coincidentally-overlapping questions now correctly
+  return `insufficient_evidence`) and against real HTTP traffic on a live
+  container. Before/after evaluation: status-match rate 0.88 -> 0.94 (one
+  golden case, GC-015, fixed); Recall@3/Recall@5 unchanged (1.0/1.0) -
+  recall for genuinely supported queries was not reduced.
+- **F5 - action enumeration.** `GET /api/actions/{id}` now returns the
+  same 404 for an action that exists but belongs to someone else as for
+  one that never existed - verified live (nonexistent -> 404, another
+  user's action -> 404 with an identical-shaped body, owner -> 200,
+  admin -> 200) and in the fixture-backed/red-team suites.
+
+**Live LLM checkpoint:** `ANTHROPIC_API_KEY` was checked again at the
+start of this phase and remains unset in this environment. No live
+provider smoke test, real RAG evaluation, real agent task-completion
+evaluation, or provider fallback test was run - **no live LLM evaluation
+was possible because no provider credentials were available in the
+environment.** Nothing here is fabricated or estimated in its place.
+
+**UI verification:** `mcp__claude-in-chrome` remained disabled in this
+environment ("Claude in Chrome is turned off in your settings") - the
+browser-rendered layer could not be manually exercised. Verified instead:
+`node --check` on `app/api/static/app.js` (no syntax errors), a full
+cross-reference of every DOM id the JS queries against `index.html` (no
+mismatches), and that `/`, `/style.css`, and `/app.js` all serve `200`
+from a live container. Every API call the UI makes was independently
+verified working (this report, `red_team_report.md`) - the UI is a thin
+fetch layer over an already-verified API, not independent logic, but its
+actual rendering was not visually confirmed this phase.
+
+## Summary: MEASURED / NOT AVAILABLE / KNOWN LIMITATION
+
+Deliberately not averaged into one score - these are unrelated
+measurements, and a blended "overall accuracy" would hide which specific
+thing is or isn't proven.
+
+| Area | Status | Detail |
+|---|---|---|
+| pytest (full suite) | **MEASURED** | 453 passed, real pack; 339 passed / 114 skipped, no pack; 0 failed |
+| Security regressions | **MEASURED** | all pass, always-runs CI tier |
+| Red team | **MEASURED** | 114/114 passing, 2 real issues found and fixed (F1, F2), 2 documented residual limitations (F4 partially fixed - see below, F5 fixed) |
+| Retrieval (Recall@K) | **MEASURED** | Recall@3 = Recall@5 = 1.0, source hit rate 0.96, real pack |
+| Agent trajectory (tool correctness, status match) | **MEASURED** | 0.84 / 0.94, judge-free, real pack |
+| Agent trajectory (task completion) | **NOT AVAILABLE** | harness-blocked without a real judge model |
+| RAG quality (faithfulness/relevancy) | **NOT AVAILABLE** | needs a real judge model |
+| Action safety | **MEASURED** | full prepare/confirm/execute attack matrix, 0 unsafe outcomes; race condition closed and re-verified |
+| Operations Radar | **MEASURED** | 6/6 real-pack alerts match the independently-written golden dataset exactly |
+| Docker build/startup | **MEASURED** | built and run this phase; valid/missing/corrupt/read-only DB and a bad secret all verified against a live container |
+| Concurrency | **MEASURED** | chat/radar 1/5/10 concurrent, 0 errors; 20-way action race, exactly 1 transition, real container |
+| API (all 5 endpoints) | **MEASURED** | verified over real HTTP against a live container this phase |
+| Latency | **MEASURED** | domain-layer, Operations Radar, and end-to-end API, all with `MockProvider` latency explicitly labeled as not production LLM latency |
+| Cost | **MEASURED (MockProvider only)** | $0.00; the accounting mechanism itself is unit-tested, never exercised against a real paid call |
+| Provider resilience | **MEASURED (construction/unit level)** | retry/fallback classification tested against real SDK exception types; **NOT AVAILABLE**: a live second-provider fallback |
+| Live LLM evaluation | **NOT AVAILABLE** | no `ANTHROPIC_API_KEY` in this environment, checked again this phase - not fabricated or estimated |
+| Semantic sufficiency (GC-016-class questions) | **KNOWN LIMITATION** | a lexical gate (F4) cannot fully resolve "retrieved text is topically strong but doesn't answer the specific fact asked" - open, documented, not claimed solved |
+| Action-existence enumeration via non-GET paths | **KNOWN LIMITATION** | `POST /api/actions/execute` still returns a distinct 403 for a non-owner (by design - see red_team_report.md F5); only `GET /api/actions/{id}` was normalized to 404 |
+
 ## Release gates
 
 Per [`quality_gates.md`](quality_gates.md):
@@ -291,9 +365,12 @@ Per [`quality_gates.md`](quality_gates.md):
 |---|---|
 | 0 unauthorized access | Met - all security tests pass, including the action workflow's |
 | 0 unsafe actions | Met - every action security scenario fails safely with a structured error, never a silent success or a duplicated effect; concurrent confirm/execute races closed via atomic compare-and-swap (see red_team_report.md F1) |
-| 0 deterministic regressions | Met - 445/445 pytest, including the full domain, Operations Radar, API-layer, and red-team suites |
+| 0 deterministic regressions | Met - 453/453 pytest, including the full domain, Operations Radar, API-layer, and red-team suites |
 | 0 invalid required citations | Met - an invalid citation gets one bounded repair attempt, then a controlled `evidence_validation_failed` result if still invalid - never a silently-edited answer shown as valid |
-| RAG/agent quality thresholds | **Not set** - no real judge-scored baseline exists yet (MockProvider limitation) |
+| 0 red-team failures | Met - 114/114 passing, re-verified after the F4/F5 fixes with no regression in authorization, prompt injection, action safety, concurrency, deployment, or information leakage |
+| 0 Docker startup regressions | Met - a fresh image built this phase starts cleanly with a valid DB, missing DB, bad secret, and read-only DB, all verified against a live container |
+| 0 concurrent action races | Met - 20 concurrent `confirm` attempts on one action, exactly 1 succeeds, re-verified against a live rebuilt container this phase |
+| AI-quality thresholds | **Not set** - no real judge-scored baseline exists; `ANTHROPIC_API_KEY` remains unavailable in this environment (checked again this phase) |
 
 ## Known limitations (full list)
 

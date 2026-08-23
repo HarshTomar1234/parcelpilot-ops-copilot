@@ -38,6 +38,10 @@ adversarial tests), the atomic compare-and-swap fix in
 `docker-entrypoint.sh` crash-on-bad-secret fix, `docs/red_team_report.md`,
 and this phase's evaluation/performance/README updates.
 
+Final release hardening: `app/agent/evidence_sufficiency.py` (the F4
+fix), the `GET /api/actions/{id}` enumeration fix (F5), regression tests
+for both, and the final consolidated evaluation/red-team report updates.
+
 ## What was verified, not assumed
 
 Every claim of "done" in this phase's docs and the private phase report
@@ -47,10 +51,15 @@ corresponds to a command that was actually run:
   writing it, not just at the end.
 - Every new test file was run in isolation before being folded into the
   full suite.
-- The full suite was run repeatedly through every phase (445 passed with
-  the real pack; 331 passed / 114 skipped / 0 failed with none, as of the
-  final red-team phase) to catch regressions as work progressed, not once
-  at the end.
+- The full suite was run repeatedly through every phase (453 passed with
+  the real pack; 339 passed / 114 skipped / 0 failed with none, as of
+  final release hardening) to catch regressions as work progressed, not
+  once at the end.
+- The evidence-sufficiency fix (F4) was evaluated before and after with
+  the real golden dataset, not assumed safe: agent status-match rate
+  0.88 -> 0.94, Recall@3/Recall@5 unchanged at 1.0/1.0 - confirming
+  recall for genuinely supported questions was not reduced, the explicit
+  constraint the phase spec set for this fix.
 - The confirm/execute race-condition fix (below) was verified three
   separate ways before being called done: a deterministic direct-function
   test, an HTTP-level `TestClient` test under real thread concurrency,
