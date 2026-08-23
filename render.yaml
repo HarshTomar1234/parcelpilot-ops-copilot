@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: parcelpilot-ops-copilot
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: PARCELPILOT_DB_B64_FILE
+        value: /etc/secrets/parcelpilot_db_b64
+      # ANTHROPIC_API_KEY intentionally not set - public deployment runs
+      # on MockProvider (see README's Configuration section) so testing
+      # this URL never costs the deployer anything.
